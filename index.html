@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controle de Cartões Pro - Otimizado</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Bibliotecas para Geração de PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #f1f5f9; 
+            color: #334155;
+        }
+        .modal { transition: opacity 0.2s ease; }
+        body.modal-active { overflow: hidden !important; }
+        .hide { display: none !important; }
+        
+        .fade-in { animation: fadeIn 0.25s ease-out forwards; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .input-modern {
+            width: 100%; border: 1px solid #cbd5e1; border-radius: 0.5rem; padding: 0.5rem 0.75rem;
+            outline: none; transition: all 0.2s; background-color: #ffffff; font-size: 0.875rem;
+        }
+        .input-modern:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+    </style>
+</head>
+<body class="antialiased h-screen flex flex-col selection:bg-blue-200">
+
+    <!-- Navbar -->
+    <nav id="navbar" class="bg-gradient-to-r from-blue-800 to-blue-600 text-white shadow hide shrink-0">
+        <div class="max-w-6xl mx-auto px-4 py-3 flex justify-between items-center">
+            <div class="flex items-center space-x-2 cursor-pointer" onclick="App.navigate('cards')">
+                <i class="fa-solid fa-wallet text-xl"></i>
+                <span class="text-lg font-bold tracking-tight">FinançasPro</span>
+            </div>
+            <div class="flex items-center gap-4 text-sm font-medium">
+                <span id="user-greeting" class="hidden sm:inline">Olá!</span>
+                <button onclick="App.logout()" class="hover:bg-white/20 px-2 py-1 rounded transition"><i class="fa-solid fa-arrow-right-from-bracket"></i> Sair</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Área Principal -->
+    <main id="app-container" class="flex-grow overflow-y-auto p-4 max-w-6xl mx-auto w-full">
+        <!-- Telas renderizadas dinamicamente -->
+    </main>
+
+    <!-- Modais e Toasts -->
+    <div id="modals-container"></div>
+    <div id="toast-container" class="fixed top-5 right-5 flex flex-col gap-2 z-[90]"></div>
+
+    <!-- Scripts -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, doc, setDoc, getDoc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // ==========================================
+        // 1. CONFIG FIREBASE
+        // ==========================================
+        let firebaseConfig = {
+            apiKey: "AIzaSyDycoeDrzLwzqgR7p2Pp918tV9QpDP48B4",
+            authDomain: "controle-financeiro-dce40.firebaseapp.com",
+            projectId: "controle-financeiro-dce40",
+            storageBucket: "controle-financeiro-dce40.firebasestorage.app",
+            messagingSenderId: "675008753356",
+            appId: "1:675008753356:web:e6b45bf4deb8d344b75c69"
+        };
+        if (typeof __firebase_config !== 'undefined') firebaseConfig = JSON.parse(__firebase_config);
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'fin-app-opt';
+
+        // ==========================================
+        // 2. ESTADO GERAL (App)
+        // ==========================================
+        window.App = {
+            user: null,
+            userProfile: null,
+            unsubscribes: [],
+            data: { cards: [], categories: [], transactions: [] },
+            ui: { view: 'loading', selectedCard: null, selectedCategory: null, selectedMonth: null, editingItem: null },
+
+            init: function() {
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        this.user = user;
+                        const profileSnap = await getDoc(doc(db, `artifacts/${appId}/users/${user.uid}/profile/data`));
+                        if(profileSnap.exists()) {
+                            this.userProfile = profileSnap.data();
+                            document.getElementById('user-greeting').innerText = `Olá, ${this.userProfile.name.split(' ')[0]}!`;
+                        }
+                        document.getElementById('navbar').classList.remove('hide');
+                        this.setupListeners();
+                        this.navigate('cards');
+                    } else {
+                        this.user = null; this.userProfile = null;
+                        document.getElementById('navbar').classList.add('hide');
+                        this.navigate('login');
+                    }
+                });
+            },
+
+            setupListeners: function() {
+                this.unsubscribes.forEach(u => u()); this.unsubscribes = [];
+                const basePath = `artifacts/${appId}/users/${this.user.uid}`;
+                const silentRender = () => { if (['cards', 'card_detail', 'category_detail'].includes(this.ui.view)) this.render(); };
+
+                this.unsubscribes.push(onSnapshot(collection(db, basePath, 'cards'), snap => { this.data.cards = snap.docs.map(d => ({ id: d.id, ...d.data() })); silentRender(); }));
+                this.unsubscribes.push(onSnapshot(collection(db, basePath, 'categories'), snap => { this.data.categories = snap.docs.map(d => ({ id: d.id, ...d.data() })); silentRender(); }));
+                this.unsubscribes.push(onSnapshot(collection(db, basePath, 'transactions'), snap => { this.data.transactions = snap.docs.map(d => ({ id: d.id, ...d.data() })); silentRender(); }));
+            },
+
+            // ==========================================
+            // SISTEMA DE MODAL DE CONFIRMAÇÃO (PROMISE)
+            // ==========================================
+            // Esta função retorna uma Promessa que pausa a execução do bloco async até o usuário clicar
+            confirmDialog: function(title, message) {
+                return new Promise((resolve) => {
+                    document.getElementById('modal-confirm-title').innerText = title;
+                    document.getElementById('modal-confirm-msg').innerText = message;
+                    
+                    const btnConfirm = document.getElementById('btn-confirm-action');
+                    const btnCancel = document.getElementById('btn-confirm-cancel');
+                    
+                    // Sobrescrevemos o onClick para não acumular eventos antigos
+                    btnConfirm.onclick = () => {
+                        this.closeModal('modal-confirm');
+                        resolve(true); // Retorna verdadeiro (Aceitou)
+                    };
+                    
+                    btnCancel.onclick = () => {
+                        this.closeModal('modal-confirm');
+                        resolve(false); // Retorna falso (Cancelou)
+                    };
+
+                    this.openModal('modal-confirm');
+                });
+            },
+
+            // ==========================================
+            // NAVEGAÇÃO
+            // ==========================================
+            navigate: function(view, data = null) {
+                this.ui.view = view;
+                if (view === 'cards') { this.ui.selectedCard = null; this.ui.selectedCategory = null; } 
+                else if (view === 'card_detail' && data) {
+                    this.ui.selectedCard = data; this.ui.selectedCategory = null;
+                    const today = new Date(); let targetDate = new Date();
+                    if (today.getDate() > parseInt(data.dueDate)) targetDate.setMonth(targetDate.getMonth() + 1);
+                    this.ui.selectedMonth = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
+                } 
+                else if (view === 'category_detail' && data) { this.ui.selectedCategory = data; }
+                
+                this.render(); this.triggerFade();
+            },
+            changeMonth: function(offset) {
+                if (!this.ui.selectedMonth) return;
+                let [year, month] = this.ui.selectedMonth.split('-').map(Number);
+                month += offset; if (month > 12) { month = 1; year++; } else if (month < 1) { month = 12; year--; }
+                this.ui.selectedMonth = `${year}-${String(month).padStart(2, '0')}`;
+                this.render(); this.triggerFade();
+            },
+            selectSpecificMonth: function(value) {
+                if(value) { this.ui.selectedMonth = value; this.render(); this.triggerFade(); }
+            },
+            triggerFade: function() {
+                const c = document.getElementById('app-container');
+                c.classList.remove('fade-in'); void c.offsetWidth; c.classList.add('fade-in');
+            },
+
+            // ==========================================
+            // AUTENTICAÇÃO
+            // ==========================================
+            login: async function(e) {
+                e.preventDefault(); const btn = document.getElementById('btn-login');
+                btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Entrando...`; btn.disabled = true;
+                try { await signInWithEmailAndPassword(auth, document.getElementById('login-email').value, document.getElementById('login-pass').value); } 
+                catch (error) { this.showToast("E-mail ou senha inválidos.", "error"); btn.innerHTML = `Entrar`; btn.disabled = false; }
+            },
+            register: async function(e) {
+                e.preventDefault(); const pass = document.getElementById('reg-pass').value;
+                if (pass !== document.getElementById('reg-pass-confirm').value) return this.showToast("As senhas não coincidem.", "error");
+                const btn = document.getElementById('btn-register'); btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Criando...`; btn.disabled = true;
+                try {
+                    const cred = await createUserWithEmailAndPassword(auth, document.getElementById('reg-email').value, pass);
+                    await setDoc(doc(db, `artifacts/${appId}/users/${cred.user.uid}/profile/data`), { name: document.getElementById('reg-name').value, phone: document.getElementById('reg-phone').value, email: document.getElementById('reg-email').value, createdAt: new Date().toISOString() });
+                } catch (error) { this.showToast("Erro ao criar conta.", "error"); btn.innerHTML = `Criar Conta`; btn.disabled = false; }
+            },
+            logout: function() { signOut(auth); },
+
+            // ==========================================
+            // CRUD FIREBASE COM NOVO MODAL
+            // ==========================================
+            saveCard: async function(e) {
+                e.preventDefault(); const id = document.getElementById('card-id').value;
+                await setDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/cards/${id || crypto.randomUUID()}`), { name: document.getElementById('card-name').value, dueDate: document.getElementById('card-due').value, updatedAt: new Date().toISOString() });
+                this.closeModal('modal-card'); this.showToast("Cartão salvo!");
+            },
+            deleteCard: async function(id) {
+                // SUBSTITUÍDO: Confirm Nativo pelo Confirm Personalizado
+                const confirmed = await this.confirmDialog("Apagar Cartão", "Tem certeza que deseja apagar este cartão? Todas as categorias e gastos dele serão perdidos.");
+                if (!confirmed) return;
+                
+                await deleteDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/cards/${id}`)); 
+                this.showToast("Cartão excluído.");
+            },
+            saveCategory: async function(e) {
+                e.preventDefault(); const id = document.getElementById('cat-id').value;
+                await setDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/categories/${id || crypto.randomUUID()}`), { name: document.getElementById('cat-name').value, cardId: this.ui.selectedCard.id, updatedAt: new Date().toISOString() });
+                this.closeModal('modal-category'); this.showToast("Categoria salva!");
+            },
+            deleteCategory: async function(id) {
+                // SUBSTITUÍDO: Confirm Nativo pelo Confirm Personalizado
+                const confirmed = await this.confirmDialog("Apagar Categoria", "Tem certeza que deseja apagar esta categoria? Todos os gastos vinculados a ela serão excluídos.");
+                if (!confirmed) return;
+
+                await deleteDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/categories/${id}`)); 
+                this.showToast("Categoria excluída.");
+            },
+            saveTransaction: async function(e) {
+                e.preventDefault(); const formId = document.getElementById('trans-id').value; const formGroupId = document.getElementById('trans-group-id').value;
+                const totalAmount = this.unmaskCurrency(document.getElementById('trans-amount').value);
+                if (isNaN(totalAmount) || totalAmount <= 0) return this.showToast("Valor inválido", "error");
+
+                const paymentType = document.getElementById('trans-type').value; const instCount = paymentType === 'vista' ? 1 : parseInt(document.getElementById('trans-installments').value);
+                const initialMonth = document.getElementById('trans-month').value;
+                
+                if (formGroupId && this.ui.editingMode === 'all') {
+                    const oldDocs = this.data.transactions.filter(t => t.groupId === formGroupId);
+                    for (let t of oldDocs) await deleteDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/transactions/${t.id}`));
+                }
+
+                const groupId = (formGroupId && this.ui.editingMode === 'all') ? formGroupId : crypto.randomUUID();
+
+                if (formId && this.ui.editingMode === 'single') {
+                    await updateDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/transactions/${formId}`), { description: document.getElementById('trans-desc').value, amount: totalAmount, invoiceMonth: initialMonth });
+                } else {
+                    for (let i = 0; i < instCount; i++) {
+                        await setDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/transactions/${crypto.randomUUID()}`), {
+                            groupId, cardId: this.ui.selectedCard.id, categoryId: this.ui.selectedCategory.id, description: document.getElementById('trans-desc').value,
+                            amount: totalAmount / instCount, totalAmount: totalAmount, installmentNumber: i + 1, totalInstallments: instCount,
+                            invoiceMonth: this.addMonthsToYYYYMM(initialMonth, i), createdAt: new Date().toISOString()
+                        });
+                    }
+                }
+                this.closeModal('modal-transaction'); this.closeModal('modal-edit-options'); this.showToast("Gasto registrado!");
+            },
+            triggerDeleteTransaction: function(txId) {
+                const tx = this.data.transactions.find(t => t.id === txId);
+                if (tx.totalInstallments > 1) { this.ui.editingItem = tx; this.openModal('modal-delete-options'); } 
+                else this.executeDeleteTransaction(txId, 'single');
+            },
+            executeDeleteTransaction: async function(txId, mode) {
+                const tx = mode === 'single' ? this.data.transactions.find(t => t.id === txId) : this.ui.editingItem;
+                
+                // Se for um registro individual (à vista ou editando um específico sem o modal de opções)
+                if (mode === 'single') {
+                    const confirmed = await this.confirmDialog("Apagar Registro", "Deseja realmente excluir este lançamento?");
+                    if(!confirmed) return;
+                    await deleteDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/transactions/${tx.id}`));
+                } else if (mode === 'all') {
+                    // Aqui já vem do modal de opções, não precisa de uma dupla confirmação, mas se quiser podemos por.
+                    const allTx = this.data.transactions.filter(t => t.groupId === tx.groupId);
+                    for (let item of allTx) await deleteDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/transactions/${item.id}`));
+                }
+                this.closeModal('modal-delete-options');
+                this.showToast("Registro excluído.");
+            },
+            triggerEditTransaction: function(txId) {
+                const tx = this.data.transactions.find(t => t.id === txId);
+                this.ui.editingItem = tx;
+                tx.totalInstallments > 1 ? this.openModal('modal-edit-options') : this.openTransactionModal('single', tx);
+            },
+
+            // ==========================================
+            // GERAÇÃO DE PDF E COMPARTILHAMENTO
+            // ==========================================
+            generateAndSharePDF: async function(type) {
+                const btnId = type === 'card' ? 'btn-pdf-card' : 'btn-pdf-cat';
+                const btn = document.getElementById(btnId); const originalHtml = btn.innerHTML;
+                btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Gerando...`; btn.disabled = true;
+
+                try {
+                    const { jsPDF } = window.jspdf; const doc = new jsPDF();
+                    const monthStr = this.formatMonthSmall(this.ui.selectedMonth); const card = this.ui.selectedCard;
+
+                    doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(30, 64, 175);
+                    doc.text(`Fatura - ${card.name}`, 14, 22);
+                    doc.setFontSize(12); doc.setTextColor(100, 116, 139); doc.setFont("helvetica", "normal");
+                    doc.text(`Mês Referência: ${monthStr} | Vencimento: Dia ${card.dueDate}`, 14, 30);
+
+                    let startY = 40; let grandTotal = 0;
+
+                    if (type === 'card') {
+                        const categories = this.data.categories.filter(c => c.cardId === card.id);
+                        const allTx = this.data.transactions.filter(t => t.cardId === card.id && t.invoiceMonth === this.ui.selectedMonth);
+                        
+                        categories.forEach(cat => {
+                            const txs = allTx.filter(t => t.categoryId === cat.id); if (txs.length === 0) return;
+                            doc.setFontSize(13); doc.setTextColor(51, 65, 85); doc.setFont("helvetica", "bold"); doc.text(cat.name, 14, startY); startY += 4;
+                            const body = txs.map(t => [ t.description + (t.totalInstallments > 1 ? ` (${t.installmentNumber}/${t.totalInstallments})` : ''), this.formatMoney(t.amount) ]);
+                            const totalCat = txs.reduce((a,b)=>a+b.amount, 0); grandTotal += totalCat;
+                            body.push([{ content: 'TOTAL DA CATEGORIA', styles: { fontStyle: 'bold' } }, { content: this.formatMoney(totalCat), styles: { fontStyle: 'bold' } }]);
+                            doc.autoTable({ startY: startY, head: [['Descrição', 'Valor (R$)']], body: body, theme: 'grid', headStyles: { fillColor: [59, 130, 246] }, styles: { fontSize: 10 }, columnStyles: { 1: { halign: 'right', cellWidth: 40 } }, didDrawPage: function (data) { startY = data.cursor.y + 10; } });
+                        });
+                        doc.setFontSize(14); doc.setTextColor(220, 38, 38); doc.text(`TOTAL DA FATURA: ${this.formatMoney(grandTotal)}`, 14, startY + 5);
+
+                    } else if (type === 'category') {
+                        const cat = this.ui.selectedCategory;
+                        const txs = this.data.transactions.filter(t => t.categoryId === cat.id && t.invoiceMonth === this.ui.selectedMonth);
+                        doc.setFontSize(14); doc.setTextColor(51, 65, 85); doc.setFont("helvetica", "bold"); doc.text(`Categoria: ${cat.name}`, 14, startY); startY += 5;
+                        const body = txs.map(t => [ t.description + (t.totalInstallments > 1 ? ` (${t.installmentNumber}/${t.totalInstallments})` : ''), this.formatMoney(t.amount) ]);
+                        const totalCat = txs.reduce((a,b)=>a+b.amount, 0);
+                        body.push([{ content: 'TOTAL DA CATEGORIA', styles: { fontStyle: 'bold' } }, { content: this.formatMoney(totalCat), styles: { fontStyle: 'bold' } }]);
+                        doc.autoTable({ startY: startY, head: [['Descrição', 'Valor (R$)']], body: body, theme: 'grid', headStyles: { fillColor: [16, 185, 129] }, styles: { fontSize: 10 }, columnStyles: { 1: { halign: 'right', cellWidth: 40 } } });
+                    }
+
+                    const pdfBlob = doc.output('blob');
+                    const fileName = `Fatura_${card.name.replace(/\s+/g, '_')}_${monthStr.replace(' / ', '_')}.pdf`;
+                    const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+                    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                        try { await navigator.share({ title: `Fatura ${card.name}`, text: `Segue em anexo a fatura de ${monthStr}.`, files: [file] }); this.showToast("Menu de compartilhamento aberto!"); } 
+                        catch (err) { if (err.name !== 'AbortError') doc.save(fileName); }
+                    } else { doc.save(fileName); this.showToast("PDF baixado com sucesso!"); }
+                } catch (error) { console.error(error); this.showToast("Erro ao gerar PDF", "error"); } 
+                finally { btn.innerHTML = originalHtml; btn.disabled = false; }
+            },
+
+            // ==========================================
+            // RENDERIZAÇÃO DE INTERFACE
+            // ==========================================
+            render: function() {
+                const c = document.getElementById('app-container');
+                if (this.ui.view === 'loading') c.innerHTML = `<div class="flex h-full items-center justify-center"><i class="fa-solid fa-spinner fa-spin text-3xl text-blue-500"></i></div>`;
+                else if (this.ui.view === 'login') c.innerHTML = this.renderLoginView();
+                else if (this.ui.view === 'register') c.innerHTML = this.renderRegisterView();
+                else if (this.ui.view === 'cards') c.innerHTML = this.renderCardsView();
+                else if (this.ui.view === 'card_detail') c.innerHTML = this.renderCardDetailView();
+                else if (this.ui.view === 'category_detail') c.innerHTML = this.renderCategoryDetailView();
+                this.renderModals();
+            },
+
+            renderLoginView: function() { return `<div class="max-w-sm mx-auto mt-10 bg-white p-6 rounded-xl shadow border border-gray-200"><div class="text-center mb-6"><i class="fa-solid fa-wallet text-3xl text-blue-600 mb-2"></i><h2 class="text-xl font-bold text-gray-800">Acessar Conta</h2></div><form onsubmit="App.login(event)" class="space-y-4"><input type="email" id="login-email" required class="input-modern" placeholder="E-mail"><input type="password" id="login-pass" required class="input-modern" placeholder="Senha"><button type="submit" id="btn-login" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded-lg transition shadow-sm">Entrar</button></form><p class="text-center text-sm text-gray-600 mt-4">Novo aqui? <button onclick="App.navigate('register')" class="text-blue-600 font-bold hover:underline">Cadastre-se</button></p></div>`; },
+            renderRegisterView: function() { return `<div class="max-w-sm mx-auto mt-6 bg-white p-6 rounded-xl shadow border border-gray-200"><div class="text-center mb-4"><h2 class="text-xl font-bold text-gray-800">Criar Conta</h2></div><form onsubmit="App.register(event)" class="space-y-3"><input type="text" id="reg-name" required class="input-modern" placeholder="Nome Completo"><input type="text" id="reg-phone" oninput="App.applyPhoneMask(this)" required class="input-modern" placeholder="Telefone"><input type="email" id="reg-email" required class="input-modern" placeholder="E-mail"><div class="grid grid-cols-2 gap-2"><input type="password" id="reg-pass" required class="input-modern" placeholder="Senha"><input type="password" id="reg-pass-confirm" required class="input-modern" placeholder="Confirmar"></div><button type="submit" id="btn-register" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-lg mt-2 transition">Cadastrar</button></form><p class="text-center text-sm text-gray-600 mt-4">Já tem conta? <button onclick="App.navigate('login')" class="text-blue-600 font-bold">Entrar</button></p></div>`; },
+            renderMonthFilter: function() { return `<div class="flex items-center bg-white rounded border border-gray-300 shadow-sm overflow-hidden h-9 w-48 shrink-0"><button onclick="App.changeMonth(-1)" class="w-8 h-full bg-gray-50 hover:bg-gray-200 border-r border-gray-300 text-gray-600 flex items-center justify-center transition"><i class="fa-solid fa-chevron-left text-xs"></i></button><div class="flex-grow h-full relative cursor-pointer group flex flex-col justify-center items-center bg-white"><input type="month" value="${this.ui.selectedMonth}" onchange="App.selectSpecificMonth(this.value)" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"><span class="text-[10px] text-gray-400 font-bold uppercase tracking-wider leading-none group-hover:text-blue-500">Fatura <i class="fa-solid fa-caret-down ml-0.5"></i></span><span class="text-sm font-bold text-blue-700 leading-tight">${this.formatMonthSmall(this.ui.selectedMonth)}</span></div><button onclick="App.changeMonth(1)" class="w-8 h-full bg-gray-50 hover:bg-gray-200 border-l border-gray-300 text-gray-600 flex items-center justify-center transition"><i class="fa-solid fa-chevron-right text-xs"></i></button></div>`; },
+            
+            renderCardsView: function() {
+                let html = `<div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold text-gray-800">Cartões</h2><button onclick="App.openCardModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium shadow-sm flex items-center gap-2 transition"><i class="fa-solid fa-plus"></i> Novo</button></div><div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">`;
+                this.data.cards.forEach(card => {
+                    const today = new Date(); let tDate = new Date(); if (today.getDate() > parseInt(card.dueDate)) tDate.setMonth(tDate.getMonth() + 1);
+                    const sugMonth = `${tDate.getFullYear()}-${String(tDate.getMonth() + 1).padStart(2, '0')}`;
+                    const txs = this.data.transactions.filter(t => t.cardId === card.id && t.invoiceMonth === sugMonth); const total = txs.reduce((acc, t) => acc + t.amount, 0);
+                    html += `<div class="bg-white rounded-xl shadow-sm border border-gray-200 hover:border-blue-300 transition cursor-pointer flex flex-col p-4" onclick="App.navigate('card_detail', {id: '${card.id}', name: '${card.name}', dueDate: '${card.dueDate}'})"><div class="flex justify-between items-start mb-1"><h3 class="text-lg font-bold text-gray-800">${card.name}</h3><div class="flex gap-2"><button onclick="event.stopPropagation(); App.openCardModal('${card.id}')" class="text-gray-400 hover:text-blue-600" title="Editar"><i class="fa-solid fa-pen text-sm"></i></button><button onclick="event.stopPropagation(); App.deleteCard('${card.id}')" class="text-gray-400 hover:text-red-600" title="Excluir"><i class="fa-solid fa-trash text-sm"></i></button></div></div><p class="text-xs text-gray-500 mb-3"><i class="fa-regular fa-calendar"></i> Vence dia ${card.dueDate}</p><div class="mt-auto pt-2 border-t border-gray-100 flex justify-between items-end"><span class="text-[10px] text-gray-500 font-bold uppercase">Fatura (${this.formatMonthSmall(sugMonth)})</span><span class="text-xl font-bold ${total > 0 ? 'text-red-600' : 'text-gray-700'}">${this.formatMoney(total)}</span></div></div>`;
+                }); return html + `</div>`;
+            },
+
+            renderCardDetailView: function() {
+                const card = this.ui.selectedCard; const categories = this.data.categories.filter(c => c.cardId === card.id);
+                const cardTx = this.data.transactions.filter(t => t.cardId === card.id && t.invoiceMonth === this.ui.selectedMonth); const totalFatura = cardTx.reduce((acc, t) => acc + t.amount, 0);
+                let html = `<div class="mb-4 flex flex-col sm:flex-row justify-between sm:items-center gap-3"><div class="flex items-center gap-3"><button onclick="App.navigate('cards')" class="text-gray-500 hover:bg-gray-200 p-1.5 rounded transition"><i class="fa-solid fa-arrow-left"></i></button><h2 class="text-xl font-bold text-gray-800">${card.name}</h2></div><div class="flex gap-2">${this.renderMonthFilter()}<button id="btn-pdf-card" onclick="App.generateAndSharePDF('card')" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 px-3 py-1.5 rounded text-sm font-semibold transition flex items-center gap-2 shadow-sm"><i class="fa-solid fa-share-nodes"></i> PDF</button></div></div><div class="bg-white rounded-xl shadow-sm border-l-4 border-blue-500 p-4 mb-5 flex justify-between items-center"><div><p class="text-xs text-gray-500 font-bold uppercase mb-0.5">Total Fatura</p><p class="text-2xl font-black text-gray-800">${this.formatMoney(totalFatura)}</p></div><button onclick="App.openCategoryModal()" class="bg-gray-100 text-gray-700 border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-200 text-sm font-semibold transition"><i class="fa-solid fa-plus text-xs"></i> Categoria</button></div><div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">`;
+                categories.forEach(cat => {
+                    const catTx = cardTx.filter(t => t.categoryId === cat.id); const totalCat = catTx.reduce((acc, t) => acc + t.amount, 0);
+                    html += `<div class="bg-white rounded-lg shadow-sm border border-gray-200 p-3 hover:bg-blue-50 transition cursor-pointer flex flex-col justify-between" onclick="App.navigate('category_detail', {id: '${cat.id}', name: '${cat.name}'})"><div class="flex justify-between items-start mb-2"><h4 class="font-bold text-gray-700 text-sm line-clamp-1">${cat.name}</h4><div class="flex gap-2 shrink-0"><button onclick="event.stopPropagation(); App.openCategoryModal('${cat.id}')" class="text-gray-400 hover:text-blue-600" title="Editar"><i class="fa-solid fa-pen text-xs"></i></button><button onclick="event.stopPropagation(); App.deleteCategory('${cat.id}')" class="text-gray-400 hover:text-red-600" title="Excluir"><i class="fa-solid fa-trash text-xs"></i></button></div></div><div class="flex justify-between items-end mt-1"><span class="text-[10px] text-gray-400">${catTx.length} reg.</span><span class="font-bold text-gray-800 text-sm">${this.formatMoney(totalCat)}</span></div></div>`;
+                }); return html + `</div>`;
+            },
+
+            renderCategoryDetailView: function() {
+                const card = this.ui.selectedCard; const cat = this.ui.selectedCategory;
+                const transactions = this.data.transactions.filter(t => t.categoryId === cat.id && t.invoiceMonth === this.ui.selectedMonth).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                const total = transactions.reduce((acc, t) => acc + t.amount, 0);
+                let html = `<div class="mb-4 flex flex-col sm:flex-row justify-between sm:items-center gap-3"><div class="flex items-center gap-3"><button onclick="App.navigate('card_detail', App.ui.selectedCard)" class="text-gray-500 hover:bg-gray-200 p-1.5 rounded transition"><i class="fa-solid fa-arrow-left"></i></button><div><p class="text-[10px] text-gray-500 font-bold uppercase mb-0.5 leading-none">${card.name}</p><h2 class="text-lg font-bold text-gray-800 leading-none">${cat.name}</h2></div></div><div class="flex flex-wrap gap-2 items-center">${this.renderMonthFilter()}<button id="btn-pdf-cat" onclick="App.generateAndSharePDF('category')" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 w-9 h-9 rounded flex items-center justify-center transition shadow-sm" title="Compartilhar/PDF"><i class="fa-solid fa-share-nodes"></i></button><button onclick="App.openTransactionModal('new')" class="bg-green-600 hover:bg-green-700 text-white w-9 h-9 rounded shadow flex items-center justify-center transition" title="Novo Gasto"><i class="fa-solid fa-plus"></i></button></div></div><div class="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden"><div class="bg-gray-800 text-white px-3 py-2 flex justify-between items-center text-sm"><span class="font-semibold flex-1">Histórico de Lançamentos</span><span class="font-bold w-[90px] text-right">${this.formatMoney(total)}</span></div><ul class="divide-y divide-gray-200 text-sm">`;
+                if (transactions.length === 0) html += `<li class="p-6 text-center text-gray-400 text-sm">Nenhum gasto registrado.</li>`;
+                transactions.forEach(tx => {
+                    const isParcelado = tx.totalInstallments > 1; const descInfo = isParcelado ? ` <span class="text-blue-600 text-[10px] font-bold">(${tx.installmentNumber}/${tx.totalInstallments})</span>` : '';
+                    html += `<li class="odd:bg-white even:bg-slate-50 px-3 py-2 flex justify-between items-center hover:bg-blue-50 transition group relative"><div class="flex-1 truncate pr-2"><span class="font-medium text-gray-800 truncate">${tx.description}${descInfo}</span></div><div class="flex items-center shrink-0"><div class="flex gap-1.5 mr-3"><button onclick="App.triggerEditTransaction('${tx.id}')" class="text-gray-400 hover:text-blue-600 hover:bg-blue-100 w-7 h-7 rounded flex items-center justify-center transition" title="Editar"><i class="fa-solid fa-pen text-xs"></i></button><button onclick="App.triggerDeleteTransaction('${tx.id}')" class="text-gray-400 hover:text-red-600 hover:bg-red-100 w-7 h-7 rounded flex items-center justify-center transition" title="Excluir"><i class="fa-solid fa-trash text-xs"></i></button></div><span class="font-bold text-gray-800 w-[90px] text-right">${this.formatMoney(tx.amount)}</span></div></li>`;
+                }); return html + `</ul></div>`;
+            },
+
+            // ==========================================
+            // MODAIS (Com o NOVO Modal de Confirmação)
+            // ==========================================
+            renderModals: function() {
+                const c = document.getElementById('modals-container');
+                c.innerHTML = `
+                <!-- NOVO MODAL GLOBAL DE CONFIRMAÇÃO (z-índice 80 para sobrepor tudo) -->
+                <div id="modal-confirm" class="modal hide fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80] flex justify-center items-center p-4">
+                    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center animate-[fadeIn_0.2s_ease-out]">
+                        <div class="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <i class="fa-solid fa-triangle-exclamation text-3xl"></i>
+                        </div>
+                        <h3 class="text-xl font-bold mb-2 text-gray-800" id="modal-confirm-title">Confirmação</h3>
+                        <p class="text-sm text-gray-500 mb-6" id="modal-confirm-msg">Tem certeza?</p>
+                        <div class="flex gap-3">
+                            <button id="btn-confirm-cancel" class="w-full py-2.5 bg-gray-100 text-gray-700 rounded-xl font-bold hover:bg-gray-200 transition">Cancelar</button>
+                            <button id="btn-confirm-action" class="w-full py-2.5 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 shadow-md transition">Confirmar</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Modais Originais -->
+                <div id="modal-card" class="modal hide fixed inset-0 bg-slate-900/40 z-50 flex justify-center items-center p-3"><div class="bg-white rounded-xl shadow-lg w-full max-w-sm"><div class="px-4 py-3 border-b flex justify-between"><h3 class="font-bold">Cartão</h3><button onclick="App.closeModal('modal-card')"><i class="fa-solid fa-xmark"></i></button></div><form onsubmit="App.saveCard(event)" class="p-4 space-y-3"><input type="hidden" id="card-id"><div><label class="text-xs font-semibold">Nome</label><input type="text" id="card-name" required class="input-modern py-1.5"></div><div><label class="text-xs font-semibold">Dia Vencimento</label><input type="number" id="card-due" min="1" max="31" required class="input-modern py-1.5"></div><button type="submit" class="w-full bg-blue-600 text-white rounded py-2 text-sm font-bold mt-2">Salvar</button></form></div></div>
+                <div id="modal-category" class="modal hide fixed inset-0 bg-slate-900/40 z-50 flex justify-center items-center p-3"><div class="bg-white rounded-xl shadow-lg w-full max-w-sm"><div class="px-4 py-3 border-b flex justify-between"><h3 class="font-bold">Categoria</h3><button onclick="App.closeModal('modal-category')"><i class="fa-solid fa-xmark"></i></button></div><form onsubmit="App.saveCategory(event)" class="p-4 space-y-3"><input type="hidden" id="cat-id"><div><label class="text-xs font-semibold">Nome</label><input type="text" id="cat-name" required class="input-modern py-1.5"></div><button type="submit" class="w-full bg-blue-600 text-white rounded py-2 text-sm font-bold mt-2">Salvar</button></form></div></div>
+                <div id="modal-transaction" class="modal hide fixed inset-0 bg-slate-900/40 z-50 flex justify-center items-center p-3"><div class="bg-white rounded-xl shadow-lg w-full max-w-sm"><div class="px-4 py-3 border-b flex justify-between"><h3 class="font-bold text-gray-800" id="modal-trans-title">Gasto</h3><button type="button" onclick="App.closeModal('modal-transaction')"><i class="fa-solid fa-xmark"></i></button></div><form onsubmit="App.saveTransaction(event)" class="p-4 space-y-3"><input type="hidden" id="trans-id"><input type="hidden" id="trans-group-id"><div><label class="text-xs font-semibold">Descrição</label><input type="text" id="trans-desc" required class="input-modern py-1.5" autocomplete="off"></div><div class="grid grid-cols-2 gap-2"><div><label class="text-xs font-semibold">Valor</label><input type="text" id="trans-amount" required oninput="App.applyCurrencyMask(this)" class="input-modern py-1.5 font-bold"></div><div><label class="text-xs font-semibold">Fatura Início</label><input type="month" id="trans-month" required class="input-modern py-1.5 px-1 cursor-pointer"></div></div><div class="bg-gray-50 p-2 rounded border border-gray-200"><label class="text-xs font-semibold">Pagamento</label><select id="trans-type" onchange="App.toggleInstallmentsField()" class="input-modern py-1.5 mb-2"><option value="vista">À Vista</option><option value="parcelado">Parcelado</option></select><div id="div-installments" class="hide"><label class="text-xs font-semibold">Qtd Parcelas</label><input type="number" id="trans-installments" min="2" max="120" value="2" class="input-modern py-1.5"></div></div><button type="submit" class="w-full bg-green-600 text-white rounded py-2 text-sm font-bold">Salvar Gasto</button></form></div></div>
+                
+                <div id="modal-edit-options" class="modal hide fixed inset-0 bg-slate-900/40 z-[60] flex justify-center items-center p-3"><div class="bg-white rounded-xl shadow-lg w-full max-w-xs p-5 text-center"><h3 class="font-bold mb-1">Editar Parcelado</h3><p class="text-xs text-gray-500 mb-4">Escolha o que deseja editar.</p><button onclick="App.openTransactionModal('single', App.ui.editingItem)" class="w-full py-2 bg-blue-50 text-blue-700 rounded text-sm font-bold mb-2">Só esta parcela</button><button onclick="App.openTransactionModal('all', App.ui.editingItem)" class="w-full py-2 bg-blue-600 text-white rounded text-sm font-bold mb-2">Compra inteira</button><button onclick="App.closeModal('modal-edit-options')" class="w-full py-1.5 text-gray-500 text-sm mt-1">Cancelar</button></div></div>
+                <div id="modal-delete-options" class="modal hide fixed inset-0 bg-slate-900/40 z-[60] flex justify-center items-center p-3"><div class="bg-white rounded-xl shadow-lg w-full max-w-xs p-5 text-center"><h3 class="font-bold text-red-600 mb-1">Excluir Parcelado</h3><button onclick="App.executeDeleteTransaction(App.ui.editingItem.id, 'single')" class="w-full py-2 bg-red-50 text-red-700 rounded text-sm font-bold mb-2 mt-4">Só esta parcela</button><button onclick="App.executeDeleteTransaction(App.ui.editingItem.id, 'all')" class="w-full py-2 bg-red-600 text-white rounded text-sm font-bold mb-2">Compra inteira</button><button onclick="App.closeModal('modal-delete-options')" class="w-full py-1.5 text-gray-500 text-sm mt-1">Cancelar</button></div></div>`;
+            },
+            
+            // UTILITÁRIOS (Helpers)
+            openModal: function(id) { document.getElementById(id).classList.remove('hide'); },
+            closeModal: function(id) { document.getElementById(id).classList.add('hide'); },
+            toggleInstallmentsField: function() { document.getElementById('trans-type').value === 'parcelado' ? document.getElementById('div-installments').classList.remove('hide') : document.getElementById('div-installments').classList.add('hide'); },
+            openCardModal: function(id = null) { const c = id ? this.data.cards.find(x => x.id === id) : null; document.getElementById('card-id').value = c ? c.id : ''; document.getElementById('card-name').value = c ? c.name : ''; document.getElementById('card-due').value = c ? c.dueDate : ''; this.openModal('modal-card'); },
+            openCategoryModal: function(id = null) { const c = id ? this.data.categories.find(x => x.id === id) : null; document.getElementById('cat-id').value = c ? c.id : ''; document.getElementById('cat-name').value = c ? c.name : ''; this.openModal('modal-category'); },
+            openTransactionModal: function(mode, tx = null) {
+                this.ui.editingMode = mode; this.closeModal('modal-edit-options');
+                document.getElementById('modal-trans-title').innerText = tx ? (mode === 'single' ? 'Editar Parcela' : 'Editar Compra') : 'Registrar Gasto';
+                document.getElementById('trans-id').value = (tx && mode === 'single') ? tx.id : ''; document.getElementById('trans-group-id').value = (tx && mode === 'all') ? tx.groupId : '';
+                document.getElementById('trans-desc').value = tx ? tx.description : ''; document.getElementById('trans-amount').value = tx ? this.formatMoney(mode === 'single' ? tx.amount : tx.totalAmount) : ''; document.getElementById('trans-month').value = tx ? tx.invoiceMonth : this.ui.selectedMonth;
+                const typeSel = document.getElementById('trans-type'), instInput = document.getElementById('trans-installments');
+                if (tx && tx.totalInstallments > 1 && mode === 'all') { typeSel.value = 'parcelado'; instInput.value = tx.totalInstallments; } else { typeSel.value = 'vista'; instInput.value = '2'; }
+                if (mode === 'single' && tx) { typeSel.disabled = true; instInput.disabled = true; } else { typeSel.disabled = false; instInput.disabled = false; }
+                this.toggleInstallmentsField(); this.openModal('modal-transaction');
+            },
+            applyCurrencyMask: function(input) { let v = input.value.replace(/\D/g, ""); if (v === "") { input.value = ""; return; } v = (parseInt(v) / 100).toFixed(2) + ""; v = v.replace(".", ","); v = v.replace(/(\d)(?=(\d{3})+(?!\d))/g, "$1."); input.value = "R$ " + v; },
+            unmaskCurrency: function(v) { return v ? parseFloat(v.replace('R$', '').trim().replace(/\./g, '').replace(',', '.')) : 0; },
+            applyPhoneMask: function(i) { let v = i.value.replace(/\D/g, ""); v = v.replace(/^(\d{2})(\d)/g, "($1) $2"); v = v.replace(/(\d)(\d{4})$/, "$1-$2"); i.value = v; },
+            formatMoney: function(v) { return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v); },
+            formatMonthSmall: function(ym) { if(!ym) return ''; const [y, m] = ym.split('-'); const d = new Date(y, m - 1); return `${d.toLocaleString('pt-BR', { month: 'short' }).replace('.','').toUpperCase()} / ${y}`; },
+            addMonthsToYYYYMM: function(ym, add) { let [y, m] = ym.split('-').map(Number); m += add; while (m > 12) { m -= 12; y++; } return `${y}-${String(m).padStart(2, '0')}`; },
+            showToast: function(msg, type = 'success') {
+                const t = document.createElement('div');
+                t.className = `px-4 py-3 rounded shadow-lg text-white text-xs font-bold transition-all duration-200 transform translate-y-5 opacity-0 ${type === 'error' ? 'bg-red-600' : 'bg-gray-800'}`;
+                t.innerText = msg; document.getElementById('toast-container').appendChild(t);
+                setTimeout(() => { t.classList.remove('translate-y-5', 'opacity-0'); }, 10);
+                setTimeout(() => { t.classList.add('opacity-0'); setTimeout(() => t.remove(), 200); }, 2500);
+            }
+        };
+
+        window.App.init();
+    </script>
+</body>
+</html>
