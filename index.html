@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Controle de Cartões Pro - Otimizado</title>
+    <title>Controle de Cartões Pro</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome -->
@@ -127,9 +127,8 @@
             },
 
             // ==========================================
-            // SISTEMA DE MODAL DE CONFIRMAÇÃO (PROMISE)
+            // MODAL DE CONFIRMAÇÃO GLOBAL (PROMISE)
             // ==========================================
-            // Esta função retorna uma Promessa que pausa a execução do bloco async até o usuário clicar
             confirmDialog: function(title, message) {
                 return new Promise((resolve) => {
                     document.getElementById('modal-confirm-title').innerText = title;
@@ -138,23 +137,15 @@
                     const btnConfirm = document.getElementById('btn-confirm-action');
                     const btnCancel = document.getElementById('btn-confirm-cancel');
                     
-                    // Sobrescrevemos o onClick para não acumular eventos antigos
-                    btnConfirm.onclick = () => {
-                        this.closeModal('modal-confirm');
-                        resolve(true); // Retorna verdadeiro (Aceitou)
-                    };
-                    
-                    btnCancel.onclick = () => {
-                        this.closeModal('modal-confirm');
-                        resolve(false); // Retorna falso (Cancelou)
-                    };
+                    btnConfirm.onclick = () => { this.closeModal('modal-confirm'); resolve(true); };
+                    btnCancel.onclick = () => { this.closeModal('modal-confirm'); resolve(false); };
 
                     this.openModal('modal-confirm');
                 });
             },
 
             // ==========================================
-            // NAVEGAÇÃO
+            // NAVEGAÇÃO E ANIMAÇÃO
             // ==========================================
             navigate: function(view, data = null) {
                 this.ui.view = view;
@@ -205,7 +196,7 @@
             logout: function() { signOut(auth); },
 
             // ==========================================
-            // CRUD FIREBASE COM NOVO MODAL
+            // CRUD FIREBASE
             // ==========================================
             saveCard: async function(e) {
                 e.preventDefault(); const id = document.getElementById('card-id').value;
@@ -213,12 +204,9 @@
                 this.closeModal('modal-card'); this.showToast("Cartão salvo!");
             },
             deleteCard: async function(id) {
-                // SUBSTITUÍDO: Confirm Nativo pelo Confirm Personalizado
                 const confirmed = await this.confirmDialog("Apagar Cartão", "Tem certeza que deseja apagar este cartão? Todas as categorias e gastos dele serão perdidos.");
                 if (!confirmed) return;
-                
-                await deleteDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/cards/${id}`)); 
-                this.showToast("Cartão excluído.");
+                await deleteDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/cards/${id}`)); this.showToast("Cartão excluído.");
             },
             saveCategory: async function(e) {
                 e.preventDefault(); const id = document.getElementById('cat-id').value;
@@ -226,19 +214,23 @@
                 this.closeModal('modal-category'); this.showToast("Categoria salva!");
             },
             deleteCategory: async function(id) {
-                // SUBSTITUÍDO: Confirm Nativo pelo Confirm Personalizado
                 const confirmed = await this.confirmDialog("Apagar Categoria", "Tem certeza que deseja apagar esta categoria? Todos os gastos vinculados a ela serão excluídos.");
                 if (!confirmed) return;
-
-                await deleteDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/categories/${id}`)); 
-                this.showToast("Categoria excluída.");
+                await deleteDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/categories/${id}`)); this.showToast("Categoria excluída.");
             },
             saveTransaction: async function(e) {
-                e.preventDefault(); const formId = document.getElementById('trans-id').value; const formGroupId = document.getElementById('trans-group-id').value;
+                e.preventDefault(); 
+                const formId = document.getElementById('trans-id').value; 
+                const formGroupId = document.getElementById('trans-group-id').value;
+                
+                // CORREÇÃO: Captura a descrição aqui fora do loop para garantir que não se perca.
+                const descText = document.getElementById('trans-desc').value.trim() || 'Gasto';
+
                 const totalAmount = this.unmaskCurrency(document.getElementById('trans-amount').value);
                 if (isNaN(totalAmount) || totalAmount <= 0) return this.showToast("Valor inválido", "error");
 
-                const paymentType = document.getElementById('trans-type').value; const instCount = paymentType === 'vista' ? 1 : parseInt(document.getElementById('trans-installments').value);
+                const paymentType = document.getElementById('trans-type').value; 
+                const instCount = paymentType === 'vista' ? 1 : parseInt(document.getElementById('trans-installments').value);
                 const initialMonth = document.getElementById('trans-month').value;
                 
                 if (formGroupId && this.ui.editingMode === 'all') {
@@ -249,12 +241,17 @@
                 const groupId = (formGroupId && this.ui.editingMode === 'all') ? formGroupId : crypto.randomUUID();
 
                 if (formId && this.ui.editingMode === 'single') {
-                    await updateDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/transactions/${formId}`), { description: document.getElementById('trans-desc').value, amount: totalAmount, invoiceMonth: initialMonth });
+                    await updateDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/transactions/${formId}`), { 
+                        description: descText, amount: totalAmount, invoiceMonth: initialMonth 
+                    });
                 } else {
                     for (let i = 0; i < instCount; i++) {
+                        // O uso do descText garante a mesma string em todas as repetições
                         await setDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/transactions/${crypto.randomUUID()}`), {
-                            groupId, cardId: this.ui.selectedCard.id, categoryId: this.ui.selectedCategory.id, description: document.getElementById('trans-desc').value,
-                            amount: totalAmount / instCount, totalAmount: totalAmount, installmentNumber: i + 1, totalInstallments: instCount,
+                            groupId, cardId: this.ui.selectedCard.id, categoryId: this.ui.selectedCategory.id, 
+                            description: descText,
+                            amount: totalAmount / instCount, totalAmount: totalAmount, 
+                            installmentNumber: i + 1, totalInstallments: instCount,
                             invoiceMonth: this.addMonthsToYYYYMM(initialMonth, i), createdAt: new Date().toISOString()
                         });
                     }
@@ -269,18 +266,15 @@
             executeDeleteTransaction: async function(txId, mode) {
                 const tx = mode === 'single' ? this.data.transactions.find(t => t.id === txId) : this.ui.editingItem;
                 
-                // Se for um registro individual (à vista ou editando um específico sem o modal de opções)
                 if (mode === 'single') {
                     const confirmed = await this.confirmDialog("Apagar Registro", "Deseja realmente excluir este lançamento?");
                     if(!confirmed) return;
                     await deleteDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/transactions/${tx.id}`));
                 } else if (mode === 'all') {
-                    // Aqui já vem do modal de opções, não precisa de uma dupla confirmação, mas se quiser podemos por.
                     const allTx = this.data.transactions.filter(t => t.groupId === tx.groupId);
                     for (let item of allTx) await deleteDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/transactions/${item.id}`));
                 }
-                this.closeModal('modal-delete-options');
-                this.showToast("Registro excluído.");
+                this.closeModal('modal-delete-options'); this.showToast("Registro excluído.");
             },
             triggerEditTransaction: function(txId) {
                 const tx = this.data.transactions.find(t => t.id === txId);
@@ -314,7 +308,7 @@
                         categories.forEach(cat => {
                             const txs = allTx.filter(t => t.categoryId === cat.id); if (txs.length === 0) return;
                             doc.setFontSize(13); doc.setTextColor(51, 65, 85); doc.setFont("helvetica", "bold"); doc.text(cat.name, 14, startY); startY += 4;
-                            const body = txs.map(t => [ t.description + (t.totalInstallments > 1 ? ` (${t.installmentNumber}/${t.totalInstallments})` : ''), this.formatMoney(t.amount) ]);
+                            const body = txs.map(t => [ (t.description || 'Gasto') + (t.totalInstallments > 1 ? ` (${t.installmentNumber}/${t.totalInstallments})` : ''), this.formatMoney(t.amount) ]);
                             const totalCat = txs.reduce((a,b)=>a+b.amount, 0); grandTotal += totalCat;
                             body.push([{ content: 'TOTAL DA CATEGORIA', styles: { fontStyle: 'bold' } }, { content: this.formatMoney(totalCat), styles: { fontStyle: 'bold' } }]);
                             doc.autoTable({ startY: startY, head: [['Descrição', 'Valor (R$)']], body: body, theme: 'grid', headStyles: { fillColor: [59, 130, 246] }, styles: { fontSize: 10 }, columnStyles: { 1: { halign: 'right', cellWidth: 40 } }, didDrawPage: function (data) { startY = data.cursor.y + 10; } });
@@ -325,7 +319,7 @@
                         const cat = this.ui.selectedCategory;
                         const txs = this.data.transactions.filter(t => t.categoryId === cat.id && t.invoiceMonth === this.ui.selectedMonth);
                         doc.setFontSize(14); doc.setTextColor(51, 65, 85); doc.setFont("helvetica", "bold"); doc.text(`Categoria: ${cat.name}`, 14, startY); startY += 5;
-                        const body = txs.map(t => [ t.description + (t.totalInstallments > 1 ? ` (${t.installmentNumber}/${t.totalInstallments})` : ''), this.formatMoney(t.amount) ]);
+                        const body = txs.map(t => [ (t.description || 'Gasto') + (t.totalInstallments > 1 ? ` (${t.installmentNumber}/${t.totalInstallments})` : ''), this.formatMoney(t.amount) ]);
                         const totalCat = txs.reduce((a,b)=>a+b.amount, 0);
                         body.push([{ content: 'TOTAL DA CATEGORIA', styles: { fontStyle: 'bold' } }, { content: this.formatMoney(totalCat), styles: { fontStyle: 'bold' } }]);
                         doc.autoTable({ startY: startY, head: [['Descrição', 'Valor (R$)']], body: body, theme: 'grid', headStyles: { fillColor: [16, 185, 129] }, styles: { fontSize: 10 }, columnStyles: { 1: { halign: 'right', cellWidth: 40 } } });
@@ -389,36 +383,23 @@
                 if (transactions.length === 0) html += `<li class="p-6 text-center text-gray-400 text-sm">Nenhum gasto registrado.</li>`;
                 transactions.forEach(tx => {
                     const isParcelado = tx.totalInstallments > 1; const descInfo = isParcelado ? ` <span class="text-blue-600 text-[10px] font-bold">(${tx.installmentNumber}/${tx.totalInstallments})</span>` : '';
-                    html += `<li class="odd:bg-white even:bg-slate-50 px-3 py-2 flex justify-between items-center hover:bg-blue-50 transition group relative"><div class="flex-1 truncate pr-2"><span class="font-medium text-gray-800 truncate">${tx.description}${descInfo}</span></div><div class="flex items-center shrink-0"><div class="flex gap-1.5 mr-3"><button onclick="App.triggerEditTransaction('${tx.id}')" class="text-gray-400 hover:text-blue-600 hover:bg-blue-100 w-7 h-7 rounded flex items-center justify-center transition" title="Editar"><i class="fa-solid fa-pen text-xs"></i></button><button onclick="App.triggerDeleteTransaction('${tx.id}')" class="text-gray-400 hover:text-red-600 hover:bg-red-100 w-7 h-7 rounded flex items-center justify-center transition" title="Excluir"><i class="fa-solid fa-trash text-xs"></i></button></div><span class="font-bold text-gray-800 w-[90px] text-right">${this.formatMoney(tx.amount)}</span></div></li>`;
+                    // CORREÇÃO VISUAL: Uso do tx.description || 'Gasto'
+                    html += `<li class="odd:bg-white even:bg-slate-50 px-3 py-2 flex justify-between items-center hover:bg-blue-50 transition group relative"><div class="flex-1 truncate pr-2"><span class="font-medium text-gray-800 truncate">${tx.description || 'Gasto'}${descInfo}</span></div><div class="flex items-center shrink-0"><div class="flex gap-1.5 mr-3"><button onclick="App.triggerEditTransaction('${tx.id}')" class="text-gray-400 hover:text-blue-600 hover:bg-blue-100 w-7 h-7 rounded flex items-center justify-center transition" title="Editar"><i class="fa-solid fa-pen text-xs"></i></button><button onclick="App.triggerDeleteTransaction('${tx.id}')" class="text-gray-400 hover:text-red-600 hover:bg-red-100 w-7 h-7 rounded flex items-center justify-center transition" title="Excluir"><i class="fa-solid fa-trash text-xs"></i></button></div><span class="font-bold text-gray-800 w-[90px] text-right">${this.formatMoney(tx.amount)}</span></div></li>`;
                 }); return html + `</ul></div>`;
             },
 
             // ==========================================
-            // MODAIS (Com o NOVO Modal de Confirmação)
+            // MODAIS (Com o Modal de Confirmação)
             // ==========================================
             renderModals: function() {
                 const c = document.getElementById('modals-container');
                 c.innerHTML = `
-                <!-- NOVO MODAL GLOBAL DE CONFIRMAÇÃO (z-índice 80 para sobrepor tudo) -->
-                <div id="modal-confirm" class="modal hide fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80] flex justify-center items-center p-4">
-                    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center animate-[fadeIn_0.2s_ease-out]">
-                        <div class="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <i class="fa-solid fa-triangle-exclamation text-3xl"></i>
-                        </div>
-                        <h3 class="text-xl font-bold mb-2 text-gray-800" id="modal-confirm-title">Confirmação</h3>
-                        <p class="text-sm text-gray-500 mb-6" id="modal-confirm-msg">Tem certeza?</p>
-                        <div class="flex gap-3">
-                            <button id="btn-confirm-cancel" class="w-full py-2.5 bg-gray-100 text-gray-700 rounded-xl font-bold hover:bg-gray-200 transition">Cancelar</button>
-                            <button id="btn-confirm-action" class="w-full py-2.5 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 shadow-md transition">Confirmar</button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Modais Originais -->
+                <!-- MODAL GLOBAL DE CONFIRMAÇÃO -->
+                <div id="modal-confirm" class="modal hide fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80] flex justify-center items-center p-4"><div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center animate-[fadeIn_0.2s_ease-out]"><div class="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4"><i class="fa-solid fa-triangle-exclamation text-3xl"></i></div><h3 class="text-xl font-bold mb-2 text-gray-800" id="modal-confirm-title">Confirmação</h3><p class="text-sm text-gray-500 mb-6" id="modal-confirm-msg">Tem certeza?</p><div class="flex gap-3"><button id="btn-confirm-cancel" class="w-full py-2.5 bg-gray-100 text-gray-700 rounded-xl font-bold hover:bg-gray-200 transition">Cancelar</button><button id="btn-confirm-action" class="w-full py-2.5 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 shadow-md transition">Confirmar</button></div></div></div>
+                <!-- Outros Modais -->
                 <div id="modal-card" class="modal hide fixed inset-0 bg-slate-900/40 z-50 flex justify-center items-center p-3"><div class="bg-white rounded-xl shadow-lg w-full max-w-sm"><div class="px-4 py-3 border-b flex justify-between"><h3 class="font-bold">Cartão</h3><button onclick="App.closeModal('modal-card')"><i class="fa-solid fa-xmark"></i></button></div><form onsubmit="App.saveCard(event)" class="p-4 space-y-3"><input type="hidden" id="card-id"><div><label class="text-xs font-semibold">Nome</label><input type="text" id="card-name" required class="input-modern py-1.5"></div><div><label class="text-xs font-semibold">Dia Vencimento</label><input type="number" id="card-due" min="1" max="31" required class="input-modern py-1.5"></div><button type="submit" class="w-full bg-blue-600 text-white rounded py-2 text-sm font-bold mt-2">Salvar</button></form></div></div>
                 <div id="modal-category" class="modal hide fixed inset-0 bg-slate-900/40 z-50 flex justify-center items-center p-3"><div class="bg-white rounded-xl shadow-lg w-full max-w-sm"><div class="px-4 py-3 border-b flex justify-between"><h3 class="font-bold">Categoria</h3><button onclick="App.closeModal('modal-category')"><i class="fa-solid fa-xmark"></i></button></div><form onsubmit="App.saveCategory(event)" class="p-4 space-y-3"><input type="hidden" id="cat-id"><div><label class="text-xs font-semibold">Nome</label><input type="text" id="cat-name" required class="input-modern py-1.5"></div><button type="submit" class="w-full bg-blue-600 text-white rounded py-2 text-sm font-bold mt-2">Salvar</button></form></div></div>
                 <div id="modal-transaction" class="modal hide fixed inset-0 bg-slate-900/40 z-50 flex justify-center items-center p-3"><div class="bg-white rounded-xl shadow-lg w-full max-w-sm"><div class="px-4 py-3 border-b flex justify-between"><h3 class="font-bold text-gray-800" id="modal-trans-title">Gasto</h3><button type="button" onclick="App.closeModal('modal-transaction')"><i class="fa-solid fa-xmark"></i></button></div><form onsubmit="App.saveTransaction(event)" class="p-4 space-y-3"><input type="hidden" id="trans-id"><input type="hidden" id="trans-group-id"><div><label class="text-xs font-semibold">Descrição</label><input type="text" id="trans-desc" required class="input-modern py-1.5" autocomplete="off"></div><div class="grid grid-cols-2 gap-2"><div><label class="text-xs font-semibold">Valor</label><input type="text" id="trans-amount" required oninput="App.applyCurrencyMask(this)" class="input-modern py-1.5 font-bold"></div><div><label class="text-xs font-semibold">Fatura Início</label><input type="month" id="trans-month" required class="input-modern py-1.5 px-1 cursor-pointer"></div></div><div class="bg-gray-50 p-2 rounded border border-gray-200"><label class="text-xs font-semibold">Pagamento</label><select id="trans-type" onchange="App.toggleInstallmentsField()" class="input-modern py-1.5 mb-2"><option value="vista">À Vista</option><option value="parcelado">Parcelado</option></select><div id="div-installments" class="hide"><label class="text-xs font-semibold">Qtd Parcelas</label><input type="number" id="trans-installments" min="2" max="120" value="2" class="input-modern py-1.5"></div></div><button type="submit" class="w-full bg-green-600 text-white rounded py-2 text-sm font-bold">Salvar Gasto</button></form></div></div>
-                
                 <div id="modal-edit-options" class="modal hide fixed inset-0 bg-slate-900/40 z-[60] flex justify-center items-center p-3"><div class="bg-white rounded-xl shadow-lg w-full max-w-xs p-5 text-center"><h3 class="font-bold mb-1">Editar Parcelado</h3><p class="text-xs text-gray-500 mb-4">Escolha o que deseja editar.</p><button onclick="App.openTransactionModal('single', App.ui.editingItem)" class="w-full py-2 bg-blue-50 text-blue-700 rounded text-sm font-bold mb-2">Só esta parcela</button><button onclick="App.openTransactionModal('all', App.ui.editingItem)" class="w-full py-2 bg-blue-600 text-white rounded text-sm font-bold mb-2">Compra inteira</button><button onclick="App.closeModal('modal-edit-options')" class="w-full py-1.5 text-gray-500 text-sm mt-1">Cancelar</button></div></div>
                 <div id="modal-delete-options" class="modal hide fixed inset-0 bg-slate-900/40 z-[60] flex justify-center items-center p-3"><div class="bg-white rounded-xl shadow-lg w-full max-w-xs p-5 text-center"><h3 class="font-bold text-red-600 mb-1">Excluir Parcelado</h3><button onclick="App.executeDeleteTransaction(App.ui.editingItem.id, 'single')" class="w-full py-2 bg-red-50 text-red-700 rounded text-sm font-bold mb-2 mt-4">Só esta parcela</button><button onclick="App.executeDeleteTransaction(App.ui.editingItem.id, 'all')" class="w-full py-2 bg-red-600 text-white rounded text-sm font-bold mb-2">Compra inteira</button><button onclick="App.closeModal('modal-delete-options')" class="w-full py-1.5 text-gray-500 text-sm mt-1">Cancelar</button></div></div>`;
             },
