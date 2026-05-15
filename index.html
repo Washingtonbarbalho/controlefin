@@ -42,6 +42,12 @@
 </head>
 <body class="antialiased h-screen flex flex-col selection:bg-blue-200">
 
+    <!-- Tela de Carregamento Global (Invisível por padrão) -->
+    <div id="global-loader" class="hide fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex flex-col justify-center items-center transition-opacity">
+        <i class="fa-solid fa-circle-notch fa-spin text-5xl text-blue-500 mb-4"></i>
+        <p id="global-loader-msg" class="text-white font-bold text-lg tracking-wide">Processando...</p>
+    </div>
+
     <nav id="navbar" class="bg-gradient-to-r from-blue-800 to-blue-600 text-white shadow z-10 shrink-0 hide">
         <div class="max-w-6xl mx-auto px-4 py-3 flex justify-between items-center">
             <div class="flex items-center space-x-3 cursor-pointer" onclick="App.navigate('cards')">
@@ -136,6 +142,15 @@
                 });
             },
 
+            // FUNÇÕES DE TELA DE CARREGAMENTO GLOBAL
+            showLoader: function(msg = "Processando...") {
+                document.getElementById('global-loader-msg').innerText = msg;
+                document.getElementById('global-loader').classList.remove('hide');
+            },
+            hideLoader: function() {
+                document.getElementById('global-loader').classList.add('hide');
+            },
+
             navigate: function(view, data = null) {
                 this.ui.view = view;
                 if (view === 'cards') { this.ui.selectedCard = null; this.ui.filterCategory = ''; } 
@@ -176,97 +191,117 @@
             register: async function(e) { e.preventDefault(); const pass = document.getElementById('reg-pass').value; if (pass !== document.getElementById('reg-pass-confirm').value) return this.showToast("As senhas não coincidem.", "error"); const btn = document.getElementById('btn-register'); btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Criando...`; btn.disabled = true; try { const cred = await createUserWithEmailAndPassword(auth, document.getElementById('reg-email').value, pass); await setDoc(doc(db, `artifacts/${appId}/users/${cred.user.uid}/profile/data`), { name: document.getElementById('reg-name').value, phone: document.getElementById('reg-phone').value, email: document.getElementById('reg-email').value, createdAt: new Date().toISOString() }); } catch (error) { this.showToast("Erro ao criar conta.", "error"); btn.innerHTML = `Criar Conta`; btn.disabled = false; } },
             logout: function() { signOut(auth); },
 
-            saveCard: async function(e) { e.preventDefault(); const id = document.getElementById('card-id').value; await setDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/cards/${id || crypto.randomUUID()}`), { name: document.getElementById('card-name').value, dueDate: document.getElementById('card-due').value, updatedAt: new Date().toISOString() }); this.closeModal('modal-card'); this.showToast("Cartão salvo!"); },
-            deleteCard: async function(id) { const confirmed = await this.confirmDialog("Apagar Cartão", "Tem certeza que deseja apagar este cartão? Todos os gastos serão perdidos."); if (!confirmed) return; await deleteDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/cards/${id}`)); this.showToast("Cartão excluído."); if(this.ui.selectedCard?.id === id) this.navigate('cards'); },
+            // ==========================================
+            // CRUD FIREBASE COM LOADER E TRY/CATCH
+            // ==========================================
+            saveCard: async function(e) { 
+                e.preventDefault(); 
+                this.showLoader("Salvando cartão...");
+                try {
+                    const id = document.getElementById('card-id').value; 
+                    await setDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/cards/${id || crypto.randomUUID()}`), { name: document.getElementById('card-name').value, dueDate: document.getElementById('card-due').value, updatedAt: new Date().toISOString() }); 
+                    this.closeModal('modal-card'); 
+                    this.showToast("Cartão salvo!"); 
+                } catch (error) {
+                    this.showToast("Erro ao salvar cartão.", "error");
+                } finally {
+                    this.hideLoader();
+                }
+            },
             
-            // ==========================================
-            // LÓGICA DE SALVAMENTO E RECORRÊNCIA
-            // ==========================================
+            deleteCard: async function(id) { 
+                const confirmed = await this.confirmDialog("Apagar Cartão", "Tem certeza que deseja apagar este cartão? Todos os gastos serão perdidos."); 
+                if (!confirmed) return; 
+                
+                this.showLoader("Apagando cartão...");
+                try {
+                    await deleteDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/cards/${id}`)); 
+                    this.showToast("Cartão excluído."); 
+                    if(this.ui.selectedCard?.id === id) this.navigate('cards'); 
+                } catch (error) {
+                    this.showToast("Erro ao apagar cartão.", "error");
+                } finally {
+                    this.hideLoader();
+                }
+            },
+            
             saveTransaction: async function(e) {
                 e.preventDefault(); 
-                const scope = this.ui.actionScope; // 'new', 'single', 'all', 'forward', 'backward'
-                const isEdit = scope && scope !== 'new';
-
-                const descText = document.getElementById('trans-desc').value.trim() || 'Gasto';
-                let catName = document.getElementById('trans-category').value.trim(); if(!catName) catName = 'Geral'; 
                 
                 const totalAmount = this.unmaskCurrency(document.getElementById('trans-amount').value);
-                const rawType = document.getElementById('trans-type').value; 
-                const isRecurring = rawType === 'recorrente';
-                
-                let instCount = 1;
-                if (rawType === 'parcelado') instCount = parseInt(document.getElementById('trans-installments').value);
-                if (isRecurring) instCount = 60; // Projeta 60 meses (5 anos) para gastos recorrentes
-                
-                const initialMonth = document.getElementById('trans-month').value;
-                
                 if (isNaN(totalAmount) || totalAmount <= 0) return this.showToast("Valor do gasto inválido.", "error");
 
-                // Gerencia Categoria
-                const catExists = this.data.categories.find(c => c.name.toLowerCase() === catName.toLowerCase());
-                let catId; if(!catExists) { catId = crypto.randomUUID(); await setDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/categories/${catId}`), { name: catName }); } else { catId = catExists.id; }
+                this.showLoader("Salvando lançamento...");
 
-                if (isEdit) {
-                    const currentTx = this.ui.editingItem;
-                    const allGroupTxs = this.data.transactions.filter(t => t.groupId === currentTx.groupId);
-                    let targetTxs = [];
+                try {
+                    const scope = this.ui.actionScope; 
+                    const isEdit = scope && scope !== 'new';
+                    const descText = document.getElementById('trans-desc').value.trim() || 'Gasto';
+                    let catName = document.getElementById('trans-category').value.trim(); if(!catName) catName = 'Geral'; 
+                    const rawType = document.getElementById('trans-type').value; 
+                    const isRecurring = rawType === 'recorrente';
+                    
+                    let instCount = 1;
+                    if (rawType === 'parcelado') instCount = parseInt(document.getElementById('trans-installments').value);
+                    if (isRecurring) instCount = 60; 
+                    
+                    const initialMonth = document.getElementById('trans-month').value;
+                    const catExists = this.data.categories.find(c => c.name.toLowerCase() === catName.toLowerCase());
+                    let catId; if(!catExists) { catId = crypto.randomUUID(); await setDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/categories/${catId}`), { name: catName }); } else { catId = catExists.id; }
 
-                    if (scope === 'single') targetTxs = [currentTx];
-                    else if (scope === 'all') targetTxs = allGroupTxs;
-                    else if (scope === 'forward') targetTxs = allGroupTxs.filter(t => t.invoiceMonth >= currentTx.invoiceMonth);
-                    else if (scope === 'backward') targetTxs = allGroupTxs.filter(t => t.invoiceMonth <= currentTx.invoiceMonth);
+                    if (isEdit) {
+                        const currentTx = this.ui.editingItem;
+                        const allGroupTxs = this.data.transactions.filter(t => t.groupId === currentTx.groupId);
+                        let targetTxs = [];
 
-                    for (let t of targetTxs) {
-                        // Calcula qual deve ser o valor inserido na atualização
-                        let updateAmount = totalAmount;
-                        if (!isRecurring && scope === 'all' && t.totalInstallments > 1) {
-                            // Se for parcelado e estiver alterando 'a compra inteira', divide o novo total pelas parcelas.
-                            updateAmount = totalAmount / t.totalInstallments;
+                        if (scope === 'single') targetTxs = [currentTx];
+                        else if (scope === 'all') targetTxs = allGroupTxs;
+                        else if (scope === 'forward') targetTxs = allGroupTxs.filter(t => t.invoiceMonth >= currentTx.invoiceMonth);
+                        else if (scope === 'backward') targetTxs = allGroupTxs.filter(t => t.invoiceMonth <= currentTx.invoiceMonth);
+
+                        for (let t of targetTxs) {
+                            let updateAmount = totalAmount;
+                            if (!isRecurring && scope === 'all' && t.totalInstallments > 1) {
+                                updateAmount = totalAmount / t.totalInstallments;
+                            }
+                            await updateDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/transactions/${t.id}`), { 
+                                description: descText, categoryName: catName, categoryId: catId, amount: updateAmount,
+                                ...(scope === 'all' && { totalAmount: isRecurring ? totalAmount : totalAmount })
+                            });
                         }
-
-                        await updateDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/transactions/${t.id}`), { 
-                            description: descText, 
-                            categoryName: catName, 
-                            categoryId: catId, 
-                            amount: updateAmount,
-                            // Se alterou a compra toda, atualiza o valor Total gravado (histórico)
-                            ...(scope === 'all' && { totalAmount: isRecurring ? totalAmount : totalAmount })
-                        });
+                    } else {
+                        const groupId = crypto.randomUUID();
+                        const amountPerInst = isRecurring ? totalAmount : (totalAmount / instCount);
+                        for (let i = 0; i < instCount; i++) { 
+                            await setDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/transactions/${crypto.randomUUID()}`), { 
+                                groupId, cardId: this.ui.selectedCard.id, 
+                                description: descText, categoryName: catName, categoryId: catId, 
+                                amount: amountPerInst, totalAmount: totalAmount, 
+                                installmentNumber: i + 1, totalInstallments: instCount, isRecurring: isRecurring,
+                                invoiceMonth: this.addMonthsToYYYYMM(initialMonth, i), createdAt: new Date().toISOString() 
+                            }); 
+                        }
                     }
-                } else {
-                    // Novo Gasto
-                    const groupId = crypto.randomUUID();
-                    const amountPerInst = isRecurring ? totalAmount : (totalAmount / instCount);
-
-                    for (let i = 0; i < instCount; i++) { 
-                        await setDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/transactions/${crypto.randomUUID()}`), { 
-                            groupId, cardId: this.ui.selectedCard.id, 
-                            description: descText, categoryName: catName, categoryId: catId, 
-                            amount: amountPerInst, totalAmount: totalAmount, 
-                            installmentNumber: i + 1, totalInstallments: instCount, isRecurring: isRecurring,
-                            invoiceMonth: this.addMonthsToYYYYMM(initialMonth, i), createdAt: new Date().toISOString() 
-                        }); 
-                    }
+                    this.closeModal('modal-transaction'); this.closeModal('modal-edit-options'); 
+                    this.showToast("Gasto salvo com sucesso!");
+                } catch (error) {
+                    console.error(error);
+                    this.showToast("Erro ao processar lançamento.", "error");
+                } finally {
+                    this.hideLoader();
                 }
-                this.closeModal('modal-transaction'); this.showToast("Gasto salvo com sucesso!");
             },
 
-            // ==========================================
-            // NOVO GERENCIADOR DE OPÇÕES DE AÇÃO
-            // ==========================================
             openActionOptions: function(action, txId) {
                 const tx = this.data.transactions.find(t => t.id === txId);
-                this.ui.editingItem = tx;
-                this.ui.currentAction = action; // 'edit' ou 'delete'
+                this.ui.editingItem = tx; this.ui.currentAction = action; 
 
-                // Se não for nem parcelado nem recorrente, pula direto pra ação
                 if (!tx.isRecurring && tx.totalInstallments === 1) {
                     if (action === 'edit') this.openTransactionModal('single');
                     else this.handleOptionSelection('single');
                     return;
                 }
 
-                // Cria os botões dinamicamente baseados no tipo do gasto
                 const title = action === 'edit' ? 'Editar Lançamento' : 'Excluir Lançamento';
                 const color = action === 'edit' ? 'blue' : 'red';
                 const modalBox = document.getElementById('action-options-content');
@@ -293,12 +328,11 @@
 
             handleOptionSelection: async function(scope) {
                 this.closeModal('modal-action-options');
-                this.ui.actionScope = scope; // 'single', 'all', 'forward', 'backward'
+                this.ui.actionScope = scope; 
                 
                 if (this.ui.currentAction === 'edit') {
                     this.openTransactionModal(scope);
                 } else {
-                    // Lógica unificada para exclusão baseada no escopo
                     const tx = this.ui.editingItem;
                     const allGroupTxs = this.data.transactions.filter(t => t.groupId === tx.groupId);
                     let targetTxs = [];
@@ -312,8 +346,16 @@
                     const confirmed = await this.confirmDialog("Excluir", `Tem certeza que deseja apagar${txtMulti}?`);
                     if(!confirmed) return;
 
-                    for (let t of targetTxs) await deleteDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/transactions/${t.id}`));
-                    this.showToast("Excluído com sucesso.");
+                    this.showLoader("Excluindo lançamento(s)...");
+                    try {
+                        for (let t of targetTxs) await deleteDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/transactions/${t.id}`));
+                        this.showToast("Excluído com sucesso.");
+                    } catch (error) {
+                        console.error(error);
+                        this.showToast("Erro ao excluir.", "error");
+                    } finally {
+                        this.hideLoader();
+                    }
                 }
             },
 
@@ -342,16 +384,17 @@
                 } catch (error) { console.error(error); this.showToast("Erro ao gerar PDF", "error"); } finally { btn.innerHTML = originalHtml; btn.disabled = false; }
             },
 
+            // ==========================================
+            // RENDERIZAÇÃO DE INTERFACE
+            // ==========================================
             render: function() { const c = document.getElementById('app-container'); if (this.ui.view === 'loading') c.innerHTML = `<div class="flex h-full items-center justify-center"><i class="fa-solid fa-spinner fa-spin text-3xl text-blue-500"></i></div>`; else if (this.ui.view === 'login') c.innerHTML = this.renderLoginView(); else if (this.ui.view === 'register') c.innerHTML = this.renderRegisterView(); else if (this.ui.view === 'cards') c.innerHTML = this.renderCardsView(); else if (this.ui.view === 'card_detail') c.innerHTML = this.renderCardDetailView(); this.renderModals(); },
             renderLoginView: function() { return `<div class="max-w-sm mx-auto mt-10 bg-white p-6 md:p-8 rounded-2xl shadow-lg border border-gray-100"><div class="text-center mb-6"><i class="fa-solid fa-wallet text-4xl text-blue-600 mb-3"></i><h2 class="text-2xl font-bold text-gray-800">Acessar Conta</h2></div><form onsubmit="App.login(event)" class="space-y-4"><input type="email" id="login-email" required class="input-modern" placeholder="E-mail"><input type="password" id="login-pass" required class="input-modern" placeholder="Senha"><button type="submit" id="btn-login" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition shadow-md">Entrar</button></form><p class="text-center text-sm text-gray-600 mt-6">Novo aqui? <button onclick="App.navigate('register')" class="text-blue-600 font-bold hover:underline">Registar-se</button></p></div>`; },
             renderRegisterView: function() { return `<div class="max-w-sm mx-auto mt-6 bg-white p-6 md:p-8 rounded-2xl shadow-lg border border-gray-100"><div class="text-center mb-6"><h2 class="text-2xl font-bold text-gray-800">Criar Conta</h2></div><form onsubmit="App.register(event)" class="space-y-4"><input type="text" id="reg-name" required class="input-modern" placeholder="Nome Completo"><input type="text" id="reg-phone" oninput="App.applyPhoneMask(this)" required class="input-modern" placeholder="Telefone"><input type="email" id="reg-email" required class="input-modern" placeholder="E-mail"><div class="grid grid-cols-2 gap-3"><input type="password" id="reg-pass" required class="input-modern" placeholder="Senha"><input type="password" id="reg-pass-confirm" required class="input-modern" placeholder="Confirmar"></div><button type="submit" id="btn-register" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl mt-3 transition shadow-md">Registar</button></form><p class="text-center text-sm text-gray-600 mt-6">Já tem conta? <button onclick="App.navigate('login')" class="text-blue-600 font-bold hover:underline">Entrar</button></p></div>`; },
             
-            // SELETOR DE MÊS TOTALMENTE CORRIGIDO PARA DESKTOP E MOBILE
             renderMonthFilter: function() { 
                 return `
                 <div class="flex items-center bg-white rounded-lg border border-gray-300 shadow-sm overflow-hidden h-10 w-full sm:w-auto shrink-0 px-1">
                     <button onclick="App.changeMonth(-1)" class="w-8 h-full text-gray-500 hover:text-blue-600 flex items-center justify-center transition"><i class="fa-solid fa-chevron-left text-sm"></i></button>
-                    
                     <div class="flex-grow flex items-center justify-center relative px-2 cursor-pointer group w-36 hover:bg-gray-50 transition h-full">
                         <input type="month" value="${this.ui.selectedMonth}" onchange="App.selectSpecificMonth(this.value)" class="native-month-picker" title="Selecionar mês">
                         <div class="flex flex-col items-center pointer-events-none">
@@ -359,7 +402,6 @@
                             <span class="text-sm font-bold text-blue-700 leading-tight">${this.formatMonthSmall(this.ui.selectedMonth)}</span>
                         </div>
                     </div>
-
                     <button onclick="App.changeMonth(1)" class="w-8 h-full text-gray-500 hover:text-blue-600 flex items-center justify-center transition"><i class="fa-solid fa-chevron-right text-sm"></i></button>
                 </div>`; 
             },
@@ -391,7 +433,6 @@
                 if (displayTxs.length === 0) { html += `<li class="p-10 text-center flex flex-col items-center justify-center text-gray-400"><div class="bg-gray-50 p-4 rounded-full mb-3"><i class="fa-solid fa-box-open text-3xl"></i></div><p class="font-medium text-gray-500">Nenhum lançamento neste mês.</p></li>`; }
                 displayTxs.forEach(tx => {
                     const isParcelado = tx.totalInstallments > 1 && !tx.isRecurring; 
-                    // NOVO BADGE para recorrentes
                     const recBadge = tx.isRecurring ? ` <span class="text-purple-600 text-[10px] font-bold bg-purple-50 px-1.5 py-0.5 rounded ml-1"><i class="fa-solid fa-repeat mr-0.5"></i>Recorrente</span>` : '';
                     const descInfo = isParcelado ? ` <span class="text-blue-600 text-[10px] font-bold bg-blue-50 px-1.5 py-0.5 rounded ml-1">(${tx.installmentNumber}/${tx.totalInstallments})</span>` : '';
                     
@@ -404,9 +445,6 @@
             renderModals: function() {
                 const c = document.getElementById('modals-container');
                 c.innerHTML = `
-                <!-- MODAL DE CONFIRMAÇÃO GLOBAL -->
-                <div id="modal-confirm" class="modal hide fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80] flex justify-center items-center p-4"><div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 md:p-8 text-center animate-[fadeIn_0.2s_ease-out]"><div class="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-5"><i class="fa-solid fa-triangle-exclamation text-3xl"></i></div><h3 class="text-2xl font-bold mb-2 text-gray-800" id="modal-confirm-title">Confirmação</h3><p class="text-sm text-gray-500 mb-8" id="modal-confirm-msg">Tem certeza?</p><div class="flex flex-col sm:flex-row gap-3"><button id="btn-confirm-cancel" class="w-full py-3 bg-gray-100 text-gray-700 rounded-xl font-bold hover:bg-gray-200 transition">Cancelar</button><button id="btn-confirm-action" class="w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 shadow-md transition">Confirmar</button></div></div></div>
-                
                 <div id="modal-card" class="modal hide fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex justify-center items-center p-4"><div class="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden"><div class="px-6 py-4 border-b bg-gray-50 flex justify-between items-center"><h3 class="font-bold text-gray-800 text-lg">Cartão de Crédito</h3><button onclick="App.closeModal('modal-card')" class="text-gray-400 hover:text-gray-800 text-xl"><i class="fa-solid fa-xmark"></i></button></div><form onsubmit="App.saveCard(event)" class="p-6 space-y-4"><input type="hidden" id="card-id"><div><label class="block text-sm font-semibold text-gray-700 mb-1">Nome do Banco/Cartão</label><input type="text" id="card-name" required class="input-modern" placeholder="Ex: Nubank"></div><div><label class="block text-sm font-semibold text-gray-700 mb-1">Dia do Vencimento</label><input type="number" id="card-due" min="1" max="31" required class="input-modern" placeholder="Ex: 10"></div><button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-3 text-base font-bold mt-4 shadow-md transition">Salvar Cartão</button></form></div></div>
                 
                 <div id="modal-transaction" class="modal hide fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[70] flex justify-center items-center p-2 sm:p-4">
@@ -427,7 +465,7 @@
 
                             <div class="grid grid-cols-2 gap-3 relative z-10">
                                 <div><label id="label-amount" class="block text-sm font-semibold text-gray-700 mb-1">Valor Total (R$)</label><input type="text" id="trans-amount" required oninput="App.applyCurrencyMask(this)" class="input-modern font-black text-blue-700 text-lg py-2"></div>
-                                <div><label class="block text-sm font-semibold text-gray-700 mb-1">Fatura Inicial</label><input type="month" id="trans-month" required class="input-modern py-2 px-2 cursor-pointer font-semibold text-gray-700"></div>
+                                <div><label class="block text-sm font-semibold text-gray-700 mb-1">Fatura Inicial</label><div class="relative cursor-pointer"><input type="month" id="trans-month" required class="native-month-picker"><input type="text" id="trans-month-display" class="input-modern py-2 px-2 font-semibold text-gray-700" readonly placeholder="Mês"></div></div>
                             </div>
 
                             <div class="bg-gray-50 p-4 rounded-xl border border-gray-200 relative z-10">
@@ -445,12 +483,20 @@
                     </div>
                 </div>
 
-                <!-- NOVO MODAL DINÂMICO DE OPÇÕES DE AÇÃO -->
                 <div id="modal-action-options" class="modal hide fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex justify-end items-end sm:justify-center sm:items-center">
-                    <div id="action-options-content" class="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center animate-[fadeIn_0.2s_ease-out]">
-                        <!-- Renderizado via JS -->
-                    </div>
+                    <div id="action-options-content" class="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center animate-[fadeIn_0.2s_ease-out]"></div>
                 </div>`;
+                
+                // Add event listener para o mês visual
+                setTimeout(() => {
+                    const picker = document.getElementById('trans-month');
+                    const display = document.getElementById('trans-month-display');
+                    if(picker && display) {
+                        picker.addEventListener('change', (e) => {
+                            display.value = App.formatMonthSmall(e.target.value);
+                        });
+                    }
+                }, 500);
             },
             
             openModal: function(id) { document.getElementById(id).classList.remove('hide'); document.body.classList.add('modal-active'); },
@@ -464,9 +510,8 @@
 
             openCardModal: function(id = null) { const c = id ? this.data.cards.find(x => x.id === id) : null; document.getElementById('card-id').value = c ? c.id : ''; document.getElementById('card-name').value = c ? c.name : ''; document.getElementById('card-due').value = c ? c.dueDate : ''; this.openModal('modal-card'); },
             
-            // FUNÇÃO ATUALIZADA: CONFIGURA O FORMULÁRIO DE GASTOS MANTENDO A SEGURANÇA NA EDIÇÃO
             openTransactionModal: function(scope, tx = null) {
-                this.ui.actionScope = scope; // 'new', 'single', 'all', 'forward', 'backward'
+                this.ui.actionScope = scope; 
                 const isEdit = scope && scope !== 'new';
                 if(!tx) tx = this.ui.editingItem;
 
@@ -478,6 +523,7 @@
                 const cat = document.getElementById('trans-category');
                 const amt = document.getElementById('trans-amount');
                 const month = document.getElementById('trans-month');
+                const monthDisplay = document.getElementById('trans-month-display');
                 const typeSel = document.getElementById('trans-type');
                 const instInput = document.getElementById('trans-installments');
 
@@ -485,20 +531,21 @@
                     desc.value = tx.description || ''; 
                     cat.value = tx.categoryName || '';
                     month.value = tx.invoiceMonth;
-                    month.disabled = true; // Bloqueia mudança de mês de referência na edição em lote para evitar offset temporal
+                    month.disabled = true; 
+                    monthDisplay.value = this.formatMonthSmall(tx.invoiceMonth);
                     
                     typeSel.value = tx.isRecurring ? 'recorrente' : (tx.totalInstallments > 1 ? 'parcelado' : 'vista');
-                    typeSel.disabled = true; // Bloqueia mudança do tipo base na edição para proteger o banco
+                    typeSel.disabled = true; 
                     instInput.value = tx.totalInstallments;
                     instInput.disabled = true;
 
-                    // Ajuste inteligente do valor a ser mostrado
-                    if (tx.isRecurring) amt.value = this.formatMoney(tx.amount); // Recorrente sempre mostra o mensal
-                    else if (tx.totalInstallments > 1 && scope === 'all') amt.value = this.formatMoney(tx.totalAmount); // Mostra o valor total da compra pra ele editar
-                    else amt.value = this.formatMoney(tx.amount); // Mostra o valor individual
+                    if (tx.isRecurring) amt.value = this.formatMoney(tx.amount); 
+                    else if (tx.totalInstallments > 1 && scope === 'all') amt.value = this.formatMoney(tx.totalAmount); 
+                    else amt.value = this.formatMoney(tx.amount); 
                 } else {
                     desc.value = ''; cat.value = ''; amt.value = '';
                     month.value = this.ui.selectedMonth; month.disabled = false;
+                    monthDisplay.value = this.formatMonthSmall(this.ui.selectedMonth);
                     typeSel.value = 'vista'; typeSel.disabled = false;
                     instInput.value = '2'; instInput.disabled = false;
                 }
