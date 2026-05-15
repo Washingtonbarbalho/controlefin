@@ -42,7 +42,7 @@
 </head>
 <body class="antialiased h-screen flex flex-col selection:bg-blue-200">
 
-    <!-- Tela de Carregamento Global (Invisível por padrão) -->
+    <!-- Tela de Carregamento Global (Adicionada e Protegida) -->
     <div id="global-loader" class="hide fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[100] flex flex-col justify-center items-center transition-opacity">
         <i class="fa-solid fa-circle-notch fa-spin text-5xl text-blue-500 mb-4"></i>
         <p id="global-loader-msg" class="text-white font-bold text-lg tracking-wide">Processando...</p>
@@ -133,24 +133,36 @@
                 this.unsubscribes.push(onSnapshot(collection(db, basePath, 'transactions'), snap => { this.data.transactions = snap.docs.map(d => ({ id: d.id, ...d.data() })); silentRender(); }));
             },
 
+            // ==========================================
+            // SISTEMA SEGURO DE CARREGAMENTO & MODAL
+            // ==========================================
+            showLoader: function(msg = "Processando...") {
+                const msgEl = document.getElementById('global-loader-msg');
+                const loaderEl = document.getElementById('global-loader');
+                if(msgEl) msgEl.innerText = msg;
+                if(loaderEl) loaderEl.classList.remove('hide');
+            },
+            hideLoader: function() {
+                const loaderEl = document.getElementById('global-loader');
+                if(loaderEl) loaderEl.classList.add('hide');
+            },
+            
             confirmDialog: function(title, message) {
                 return new Promise((resolve) => {
-                    document.getElementById('modal-confirm-title').innerText = title; document.getElementById('modal-confirm-msg').innerText = message;
+                    const titleEl = document.getElementById('modal-confirm-title');
+                    const msgEl = document.getElementById('modal-confirm-msg');
+                    if(titleEl) titleEl.innerText = title; 
+                    if(msgEl) msgEl.innerText = message;
+                    
                     document.getElementById('btn-confirm-action').onclick = () => { this.closeModal('modal-confirm'); resolve(true); };
                     document.getElementById('btn-confirm-cancel').onclick = () => { this.closeModal('modal-confirm'); resolve(false); };
                     this.openModal('modal-confirm');
                 });
             },
 
-            // FUNÇÕES DE TELA DE CARREGAMENTO GLOBAL
-            showLoader: function(msg = "Processando...") {
-                document.getElementById('global-loader-msg').innerText = msg;
-                document.getElementById('global-loader').classList.remove('hide');
-            },
-            hideLoader: function() {
-                document.getElementById('global-loader').classList.add('hide');
-            },
-
+            // ==========================================
+            // NAVEGAÇÃO E ANIMAÇÃO
+            // ==========================================
             navigate: function(view, data = null) {
                 this.ui.view = view;
                 if (view === 'cards') { this.ui.selectedCard = null; this.ui.filterCategory = ''; } 
@@ -192,7 +204,7 @@
             logout: function() { signOut(auth); },
 
             // ==========================================
-            // CRUD FIREBASE COM LOADER E TRY/CATCH
+            // CRUD FIREBASE COM TRY/CATCH + CARREGAMENTO
             // ==========================================
             saveCard: async function(e) { 
                 e.preventDefault(); 
@@ -249,6 +261,9 @@
                     const catExists = this.data.categories.find(c => c.name.toLowerCase() === catName.toLowerCase());
                     let catId; if(!catExists) { catId = crypto.randomUUID(); await setDoc(doc(db, `artifacts/${appId}/users/${this.user.uid}/categories/${catId}`), { name: catName }); } else { catId = catExists.id; }
 
+                    const formId = document.getElementById('trans-id').value; 
+                    const formGroupId = document.getElementById('trans-group-id').value;
+
                     if (isEdit) {
                         const currentTx = this.ui.editingItem;
                         const allGroupTxs = this.data.transactions.filter(t => t.groupId === currentTx.groupId);
@@ -282,7 +297,8 @@
                             }); 
                         }
                     }
-                    this.closeModal('modal-transaction'); this.closeModal('modal-edit-options'); 
+                    this.closeModal('modal-transaction'); 
+                    this.closeModal('modal-action-options'); 
                     this.showToast("Gasto salvo com sucesso!");
                 } catch (error) {
                     console.error(error);
@@ -292,9 +308,11 @@
                 }
             },
 
+            // FUNÇÃO UNIFICADA DE OPÇÕES DE AÇÃO (Substitui os botões antigos com bugs)
             openActionOptions: function(action, txId) {
                 const tx = this.data.transactions.find(t => t.id === txId);
-                this.ui.editingItem = tx; this.ui.currentAction = action; 
+                this.ui.editingItem = tx; 
+                this.ui.currentAction = action; 
 
                 if (!tx.isRecurring && tx.totalInstallments === 1) {
                     if (action === 'edit') this.openTransactionModal('single');
@@ -305,6 +323,7 @@
                 const title = action === 'edit' ? 'Editar Lançamento' : 'Excluir Lançamento';
                 const color = action === 'edit' ? 'blue' : 'red';
                 const modalBox = document.getElementById('action-options-content');
+                if(!modalBox) return;
                 
                 let html = `<div class="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-4 sm:hidden"></div>`;
                 html += `<h3 class="text-xl font-bold mb-2 text-${color}-600">${title}</h3>`;
@@ -437,6 +456,8 @@
                     const descInfo = isParcelado ? ` <span class="text-blue-600 text-[10px] font-bold bg-blue-50 px-1.5 py-0.5 rounded ml-1">(${tx.installmentNumber}/${tx.totalInstallments})</span>` : '';
                     
                     const badgeCat = `<span class="inline-flex items-center mt-1 bg-gray-100 border border-gray-200 text-gray-600 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider"><i class="fa-solid fa-tag text-[8px] mr-1"></i> ${tx.categoryName || 'Geral'}</span>`;
+                    
+                    // CORREÇÃO CRUCIAL AQUI: Agora usamos openActionOptions corretamente!
                     html += `<li class="odd:bg-white even:bg-slate-50 px-4 py-3 md:py-4 flex flex-col sm:flex-row sm:justify-between sm:items-center hover:bg-blue-50 transition group relative gap-3 sm:gap-0"><div class="flex-1 pr-2"><div class="font-bold text-gray-800 text-base leading-tight">${tx.description || 'Gasto'}${recBadge}${descInfo}</div>${badgeCat}</div><div class="flex items-center justify-between sm:justify-end shrink-0 w-full sm:w-auto border-t sm:border-0 pt-2 sm:pt-0 mt-1 sm:mt-0"><span class="font-black text-gray-800 text-lg w-auto sm:w-[110px] text-left sm:text-right mr-auto sm:mr-0 order-1 sm:order-2">${this.formatMoney(tx.amount)}</span><div class="flex gap-2 order-2 sm:order-1 sm:mr-4"><button onclick="App.openActionOptions('edit', '${tx.id}')" class="text-gray-500 hover:text-blue-600 hover:bg-blue-100 bg-white border border-gray-200 w-8 h-8 rounded-lg flex items-center justify-center transition shadow-sm" title="Editar"><i class="fa-solid fa-pen text-xs"></i></button><button onclick="App.openActionOptions('delete', '${tx.id}')" class="text-gray-500 hover:text-red-600 hover:bg-red-100 bg-white border border-gray-200 w-8 h-8 rounded-lg flex items-center justify-center transition shadow-sm" title="Excluir"><i class="fa-solid fa-trash text-xs"></i></button></div></div></li>`;
                 }); 
                 return html + `</ul></div>`;
@@ -445,6 +466,7 @@
             renderModals: function() {
                 const c = document.getElementById('modals-container');
                 c.innerHTML = `
+                <div id="modal-confirm" class="modal hide fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80] flex justify-center items-center p-4"><div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 md:p-8 text-center animate-[fadeIn_0.2s_ease-out]"><div class="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-5"><i class="fa-solid fa-triangle-exclamation text-3xl"></i></div><h3 class="text-2xl font-bold mb-2 text-gray-800" id="modal-confirm-title">Confirmação</h3><p class="text-sm text-gray-500 mb-8" id="modal-confirm-msg">Tem certeza?</p><div class="flex flex-col sm:flex-row gap-3"><button id="btn-confirm-cancel" class="w-full py-3 bg-gray-100 text-gray-700 rounded-xl font-bold hover:bg-gray-200 transition">Cancelar</button><button id="btn-confirm-action" class="w-full py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 shadow-md transition">Confirmar</button></div></div></div>
                 <div id="modal-card" class="modal hide fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex justify-center items-center p-4"><div class="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden"><div class="px-6 py-4 border-b bg-gray-50 flex justify-between items-center"><h3 class="font-bold text-gray-800 text-lg">Cartão de Crédito</h3><button onclick="App.closeModal('modal-card')" class="text-gray-400 hover:text-gray-800 text-xl"><i class="fa-solid fa-xmark"></i></button></div><form onsubmit="App.saveCard(event)" class="p-6 space-y-4"><input type="hidden" id="card-id"><div><label class="block text-sm font-semibold text-gray-700 mb-1">Nome do Banco/Cartão</label><input type="text" id="card-name" required class="input-modern" placeholder="Ex: Nubank"></div><div><label class="block text-sm font-semibold text-gray-700 mb-1">Dia do Vencimento</label><input type="number" id="card-due" min="1" max="31" required class="input-modern" placeholder="Ex: 10"></div><button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-3 text-base font-bold mt-4 shadow-md transition">Salvar Cartão</button></form></div></div>
                 
                 <div id="modal-transaction" class="modal hide fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[70] flex justify-center items-center p-2 sm:p-4">
@@ -483,11 +505,13 @@
                     </div>
                 </div>
 
+                <!-- NOVO MODAL DE AÇÕES GARANTIDO NA ESTRUTURA -->
                 <div id="modal-action-options" class="modal hide fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex justify-end items-end sm:justify-center sm:items-center">
-                    <div id="action-options-content" class="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center animate-[fadeIn_0.2s_ease-out]"></div>
+                    <div id="action-options-content" class="bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center animate-[fadeIn_0.2s_ease-out]">
+                        <!-- Renderizado via JS -->
+                    </div>
                 </div>`;
                 
-                // Add event listener para o mês visual
                 setTimeout(() => {
                     const picker = document.getElementById('trans-month');
                     const display = document.getElementById('trans-month-display');
@@ -499,8 +523,14 @@
                 }, 500);
             },
             
-            openModal: function(id) { document.getElementById(id).classList.remove('hide'); document.body.classList.add('modal-active'); },
-            closeModal: function(id) { document.getElementById(id).classList.add('hide'); document.body.classList.remove('modal-active'); },
+            openModal: function(id) { 
+                const el = document.getElementById(id);
+                if(el) { el.classList.remove('hide'); document.body.classList.add('modal-active'); }
+            },
+            closeModal: function(id) { 
+                const el = document.getElementById(id);
+                if(el) { el.classList.add('hide'); document.body.classList.remove('modal-active'); }
+            },
             
             toggleInstallmentsField: function() { 
                 const t = document.getElementById('trans-type').value; 
