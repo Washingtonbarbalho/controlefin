@@ -1,0 +1,51 @@
+name: Validate application
+
+on:
+  push:
+    branches:
+      - main
+      - agent/add-accounts-and-permissions
+  pull_request:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check JavaScript syntax
+        run: |
+          for file in *.js; do
+            echo "Checking $file"
+            node --check "$file"
+          done
+      - name: Check local module imports
+        run: |
+          node --input-type=module <<'EOF'
+          import fs from 'node:fs';
+          const files = fs.readdirSync('.').filter(file => file.endsWith('.js'));
+          const missing = [];
+          for (const file of files) {
+            const source = fs.readFileSync(file, 'utf8');
+            for (const match of source.matchAll(/from\s+['"](\.\/[^'"]+)['"]|import\s+['"](\.\/[^'"]+)['"]/g)) {
+              const target = match[1] || match[2];
+              if (!fs.existsSync(target)) missing.push(`${file}: ${target}`);
+            }
+          }
+          if (missing.length) {
+            console.error('Missing imports:\n' + missing.join('\n'));
+            process.exit(1);
+          }
+          console.log('All local imports exist.');
+          EOF
+      - name: Check required application files
+        run: |
+          test -f index.html
+          test -f manifest.json
+          test -f firestore.rules
+          test -f firebase.json
+          grep -q 'main.js' index.html
+          grep -q 'Contas a Pagar' app-accounts.js
+          grep -q 'washington.wn8@gmail.com' firestore.rules
