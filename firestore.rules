@@ -14,8 +14,14 @@ service cloud.firestore {
         && request.auth.token.email == 'washington.wn8@gmail.com';
     }
 
-    // Perfil: o proprietário administra o próprio perfil e o administrador
-    // pode ler os perfis para montar a lista de usuários já existentes.
+    // Necessário para a consulta collectionGroup('profile') usada pelo painel.
+    // O administrador pode ler somente documentos dentro de coleções "profile",
+    // independentemente de quando o usuário foi cadastrado.
+    match /{path=**}/profile/{docId} {
+      allow read: if isAdmin();
+    }
+
+    // Perfil: o proprietário administra o próprio perfil.
     match /artifacts/{appId}/users/{userId}/profile/{docId} {
       allow read: if isOwner(userId) || isAdmin();
       allow create, update, delete: if isOwner(userId);
