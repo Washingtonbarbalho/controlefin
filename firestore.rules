@@ -1,0 +1,31 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return signedIn() && request.auth.token.email == 'washington.wn8@gmail.com';
+    }
+
+    match /artifacts/{appId}/users/{userId}/{document=**} {
+      allow read, write: if isOwner(userId);
+    }
+
+    match /artifacts/{appId}/userDirectory/{userId} {
+      allow read: if isAdmin() || isOwner(userId);
+      allow create, update: if isAdmin() || isOwner(userId);
+      allow delete: if isAdmin();
+    }
+
+    match /artifacts/{appId}/access/{userId} {
+      allow read: if isAdmin() || isOwner(userId);
+      allow create, update, delete: if isAdmin();
+    }
+  }
+}
