@@ -10,5 +10,6 @@ import './app-admin.js';
 import './app-reports.js';
 import './app-auth.js';
 import './app-ui-fixes.js';
+import './app-account-enhancements.js';
 
 App.init();
