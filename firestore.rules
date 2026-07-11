@@ -10,22 +10,62 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return signedIn() && request.auth.token.email == 'washington.wn8@gmail.com';
+      return signedIn()
+        && request.auth.token.email == 'washington.wn8@gmail.com';
     }
 
-    match /artifacts/{appId}/users/{userId}/{document=**} {
+    // Perfil: o proprietário administra o próprio perfil e o administrador
+    // pode ler os perfis para montar a lista de usuários já existentes.
+    match /artifacts/{appId}/users/{userId}/profile/{docId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update, delete: if isOwner(userId);
+    }
+
+    // Dados financeiros permanecem privados para o proprietário.
+    match /artifacts/{appId}/users/{userId}/cards/{cardId} {
       allow read, write: if isOwner(userId);
     }
 
+    match /artifacts/{appId}/users/{userId}/categories/{categoryId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    match /artifacts/{appId}/users/{userId}/transactions/{transactionId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    match /artifacts/{appId}/users/{userId}/accounts/{accountId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Diretório complementar criado quando o usuário entra na versão nova.
     match /artifacts/{appId}/userDirectory/{userId} {
       allow read: if isAdmin() || isOwner(userId);
-      allow create, update: if isAdmin() || isOwner(userId);
+
+      allow create: if isAdmin() || (
+        isOwner(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.email == request.auth.token.email
+      );
+
+      allow update: if isAdmin() || (
+        isOwner(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.email == request.auth.token.email
+      );
+
       allow delete: if isAdmin();
     }
 
+    // Somente o administrador altera permissões. Cada usuário pode ler a própria.
     match /artifacts/{appId}/access/{userId} {
       allow read: if isAdmin() || isOwner(userId);
       allow create, update, delete: if isAdmin();
+    }
+
+    // Qualquer caminho não previsto continua bloqueado.
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
