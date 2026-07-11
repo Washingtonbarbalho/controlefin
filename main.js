@@ -11,5 +11,6 @@ import './app-reports.js';
 import './app-auth.js';
 import './app-ui-fixes.js';
 import './app-account-enhancements.js';
+import './app-centered-period-selector.js';
 
 App.init();
