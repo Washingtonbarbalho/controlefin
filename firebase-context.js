@@ -2,8 +2,16 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebas
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
 import { getFirestore, collection, onSnapshot, doc, setDoc, getDoc, deleteDoc, updateDoc, writeBatch } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
 
-const fallbackConfig = JSON.parse(atob('eyJhcGlLZXkiOiJBSXphU3lEeWNvZURyekx3enFnUjJwUHA5MTh0VjlRcERQNDhCNCIsImF1dGhEb21haW4iOiJjb250cm9sZS1maW5hbmNlaXJvLWRjZTQwLmZpcmViYXNlYXBwLmNvbSIsInByb2plY3RJZCI6ImNvbnRyb2xlLWZpbmFuY2Vpcm8tZGNlNDAiLCJzdG9yYWdlQnVja2V0IjoiY29udHJvbGUtZmluYW5jZWlyby1kY2U0MC5maXJlYmFzZXN0b3JhZ2UuYXBwIiwibWVzc2FnaW5nU2VuZGVySWQiOiI2NzUwMDg3NTMzNTYiLCJhcHBJZCI6IjE6Njc1MDA4NzUzMzU2OndlYjplNmI0NWJmNGRlYjhkMzQ0Yjc1YzY5In0='));
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : fallbackConfig;
+// Mesma configuração Firebase utilizada pela versão original do aplicativo.
+// A chave de API identifica o projeto no cliente; não é uma senha de usuário.
+const firebaseConfig = {
+    apiKey: 'AIzaSyDycoeDrzLwzqgR7p2Pp918tV9QpDP48B4',
+    authDomain: 'controle-financeiro-dce40.firebaseapp.com',
+    projectId: 'controle-financeiro-dce40',
+    storageBucket: 'controle-financeiro-dce40.firebasestorage.app',
+    messagingSenderId: '675008753356',
+    appId: '1:675008753356:web:e6b45bf4deb8d344b75c69'
+};
 
 const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
