@@ -12,24 +12,48 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Validate JavaScript
+
+      - name: Validate application
+        id: validate
         shell: bash
         run: |
-          set -e
+          set +e
+          status=0
+          : > validation.log
+
+          echo "JavaScript syntax" | tee -a validation.log
           for file in *.js; do
-            echo "Checking $file"
-            node --check "$file"
+            echo "Checking $file" | tee -a validation.log
+            node --check "$file" >> validation.log 2>&1
+            code=$?
+            if [ $code -ne 0 ]; then
+              echo "FAILED: $file" | tee -a validation.log
+              status=1
+            fi
           done
-      - name: Validate application files
-        shell: bash
-        run: |
-          set -e
-          test -f index.html
-          test -f main.js
-          test -f app-cards.js
-          test -f app-accounts.js
-          test -f app-admin.js
-          test -f firestore.rules
-          grep -q 'main.js' index.html
-          grep -q 'Contas a Pagar' app-accounts.js
-          grep -q 'washington.wn8@gmail.com' firestore.rules
+
+          echo "Required files" | tee -a validation.log
+          for file in index.html main.js app-cards.js app-accounts.js app-admin.js firestore.rules; do
+            if [ ! -f "$file" ]; then
+              echo "MISSING: $file" | tee -a validation.log
+              status=1
+            else
+              echo "FOUND: $file" | tee -a validation.log
+            fi
+          done
+
+          grep -q 'main.js' index.html || { echo 'MISSING REFERENCE: main.js in index.html' | tee -a validation.log; status=1; }
+          grep -q 'Contas a Pagar' app-accounts.js || { echo 'MISSING TEXT: Contas a Pagar' | tee -a validation.log; status=1; }
+          grep -q 'washington.wn8@gmail.com' firestore.rules || { echo 'MISSING ADMIN EMAIL IN RULES' | tee -a validation.log; status=1; }
+
+          echo "RESULT=$status" | tee -a validation.log
+          cat validation.log
+          exit $status
+
+      - name: Upload validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-report
+          path: validation.log
+          retention-days: 1
