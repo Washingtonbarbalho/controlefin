@@ -1,11 +1,13 @@
 {
-  "name": "FinançasPro - Controle de Cartões",
+  "name": "FinançasPro - Cartões e Contas",
   "short_name": "FinançasPro",
   "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
+  "orientation": "portrait-primary",
   "background_color": "#f1f5f9",
   "theme_color": "#1e40af",
-  "description": "Controle seus gastos e faturas de cartão de forma simples e rápida.",
+  "description": "Controle cartões, contas a pagar e contas a receber em um só lugar.",
   "icons": [
     {
       "src": "icon.svg",
