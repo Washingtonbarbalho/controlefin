@@ -52,4 +52,4 @@ const getDeferredPrompt = () => deferredPrompt;
 const clearDeferredPrompt = () => { deferredPrompt = null; };
 
 window.App = App;
-export { App, db, auth, APP_ID, ADMIN_EMAIL, doc, setDoc, getDoc, deleteDoc, updateDoc, writeBatch, collection, onSnapshot, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, getDeferredPrompt, clearDeferredPrompt };
+export { App, db, auth, APP_ID, ADMIN_EMAIL, doc, setDoc, getDoc, deleteDoc, updateDoc, writeBatch, collection, onSnapshot, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, getDeferredPrompt, clearDeferredPrompt };
