@@ -1,4 +1,4 @@
-import { App, db, auth, APP_ID, ADMIN_EMAIL, doc, setDoc, getDoc, collection, onSnapshot, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, getDeferredPrompt, clearDeferredPrompt } from './firebase-context.js';
+import { App, db, auth, APP_ID, ADMIN_EMAIL, doc, setDoc, getDoc, collection, onSnapshot, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, getDeferredPrompt, clearDeferredPrompt } from './firebase-context.js';
 
 Object.assign(App, {
     init() {
