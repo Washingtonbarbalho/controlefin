@@ -1,0 +1,34 @@
+name: Validate application
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Validate JavaScript
+        shell: bash
+        run: |
+          set -e
+          for file in *.js; do
+            echo "Checking $file"
+            node --check "$file"
+          done
+      - name: Validate application files
+        shell: bash
+        run: |
+          set -e
+          test -f index.html
+          test -f main.js
+          test -f app-cards.js
+          test -f app-accounts.js
+          test -f app-admin.js
+          test -f firestore.rules
+          grep -q 'main.js' index.html
+          grep -q 'Contas a Pagar' app-accounts.js
+          grep -q 'washington.wn8@gmail.com' firestore.rules
