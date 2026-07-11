@@ -9,5 +9,6 @@ import './app-accounts.js';
 import './app-admin.js';
 import './app-reports.js';
 import './app-auth.js';
+import './app-ui-fixes.js';
 
 App.init();
