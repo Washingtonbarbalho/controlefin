@@ -1,4 +1,4 @@
-const CACHE_NAME = 'financas-pro-v8';
+const CACHE_NAME = 'financas-pro-v9';
 const APP_SHELL = [
   './',
   './index.html',
@@ -16,6 +16,7 @@ const APP_SHELL = [
   './app-reports.js',
   './app-auth.js',
   './app-ui-fixes.js',
+  './app-account-enhancements.js',
   './icon.svg',
   './icon.png',
   './favicon.png'
