@@ -3,7 +3,23 @@ import { App } from './firebase-context.js';
 const originalNavigate = App.navigate.bind(App);
 
 Object.assign(App, {
+    goHome() {
+        if (!this.user) return this.navigate('login');
+        if (this.permissions.cards) return this.navigate('cards');
+        if (this.permissions.accounts) return this.navigate('accounts');
+        return this.navigate('no_access');
+    },
+
+    renderHomeView() {
+        if (this.permissions.cards) return this.renderCardsView();
+        if (this.permissions.accounts) return this.renderAccountsView();
+        return this.renderNoAccessView();
+    },
+
     navigate(view, data = null) {
+        if (view === 'home') {
+            return this.goHome();
+        }
         if (view === 'accounts') {
             this.ui.accountListOpen = false;
             this.ui.filterCategory = '';
@@ -37,15 +53,6 @@ Object.assign(App, {
         this.ui.filterCategory = '';
         this.render();
         this.triggerFade();
-    },
-
-    openNewAccountForKind(kind, event = null) {
-        event?.stopPropagation();
-        this.ui.accountKind = kind === 'receivable' ? 'receivable' : 'payable';
-        this.ui.accountListOpen = true;
-        this.ui.filterCategory = '';
-        this.ui.selectedMonth = this.ui.selectedMonth || this.currentYearMonth();
-        this.openAccountModal('new');
     },
 
     setAccountKind(kind) {
@@ -85,16 +92,13 @@ Object.assign(App, {
                     (item.month || item.dueDate?.slice(0, 7)) === this.ui.selectedMonth
                 );
                 const total = accounts.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-                const settled = accounts.filter(item => item.settled).reduce((sum, item) => sum + Number(item.amount || 0), 0);
-                const pending = total - settled;
-                const overdue = accounts.filter(item => !item.settled && this.isOverdue(item.dueDate)).length;
-                return { accounts, total, settled, pending, overdue };
+                return { accounts, total };
             };
 
             const payable = summarize('payable');
             const receivable = summarize('receivable');
 
-            return `<div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6"><div><p class="text-xs text-emerald-600 font-black uppercase tracking-widest">Modo Contas</p><h1 class="text-2xl sm:text-3xl font-black text-slate-800">Contas a Pagar e Receber</h1><p class="text-sm text-slate-500 mt-1">Escolha o tipo de conta que deseja gerenciar.</p></div>${this.renderMonthFilter('Vencimentos')}</div><div class="grid md:grid-cols-2 gap-5"><article class="card-surface p-6 hover:border-red-400 hover:shadow-md transition cursor-pointer flex flex-col" onclick="App.openAccountKind('payable')"><div class="flex items-start justify-between gap-4"><div><div class="w-13 h-13 bg-red-100 text-red-700 rounded-2xl flex items-center justify-center text-xl mb-4"><i class="fa-solid fa-arrow-up"></i></div><p class="text-xs text-red-600 font-black uppercase tracking-widest">Saídas</p><h2 class="text-2xl font-black text-slate-800 mt-1">Contas a Pagar</h2></div><button type="button" onclick="App.openNewAccountForKind('payable', event)" class="action-icon text-red-600" title="Nova conta a pagar"><i class="fa-solid fa-plus"></i></button></div><div class="mt-6"><p class="text-[10px] text-slate-400 font-black uppercase">Total em ${this.formatMonthSmall(this.ui.selectedMonth)}</p><p class="text-3xl font-black text-red-600 mt-1">${this.formatMoney(payable.total)}</p></div><div class="grid grid-cols-3 gap-2 mt-5 pt-4 border-t border-slate-100 text-center"><div><p class="text-[10px] text-slate-400 font-black uppercase">Contas</p><strong class="text-slate-700">${payable.accounts.length}</strong></div><div><p class="text-[10px] text-slate-400 font-black uppercase">Pendente</p><strong class="text-amber-600">${this.formatMoney(payable.pending)}</strong></div><div><p class="text-[10px] text-slate-400 font-black uppercase">Atrasadas</p><strong class="text-red-600">${payable.overdue}</strong></div></div><span class="inline-flex items-center gap-2 mt-5 text-red-700 font-extrabold">Abrir contas a pagar <i class="fa-solid fa-arrow-right"></i></span></article><article class="card-surface p-6 hover:border-emerald-400 hover:shadow-md transition cursor-pointer flex flex-col" onclick="App.openAccountKind('receivable')"><div class="flex items-start justify-between gap-4"><div><div class="w-13 h-13 bg-emerald-100 text-emerald-700 rounded-2xl flex items-center justify-center text-xl mb-4"><i class="fa-solid fa-arrow-down"></i></div><p class="text-xs text-emerald-600 font-black uppercase tracking-widest">Entradas</p><h2 class="text-2xl font-black text-slate-800 mt-1">Contas a Receber</h2></div><button type="button" onclick="App.openNewAccountForKind('receivable', event)" class="action-icon text-emerald-600" title="Nova conta a receber"><i class="fa-solid fa-plus"></i></button></div><div class="mt-6"><p class="text-[10px] text-slate-400 font-black uppercase">Total em ${this.formatMonthSmall(this.ui.selectedMonth)}</p><p class="text-3xl font-black text-emerald-600 mt-1">${this.formatMoney(receivable.total)}</p></div><div class="grid grid-cols-3 gap-2 mt-5 pt-4 border-t border-slate-100 text-center"><div><p class="text-[10px] text-slate-400 font-black uppercase">Contas</p><strong class="text-slate-700">${receivable.accounts.length}</strong></div><div><p class="text-[10px] text-slate-400 font-black uppercase">Pendente</p><strong class="text-amber-600">${this.formatMoney(receivable.pending)}</strong></div><div><p class="text-[10px] text-slate-400 font-black uppercase">Atrasadas</p><strong class="text-red-600">${receivable.overdue}</strong></div></div><span class="inline-flex items-center gap-2 mt-5 text-emerald-700 font-extrabold">Abrir contas a receber <i class="fa-solid fa-arrow-right"></i></span></article></div>`;
+            return `<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6"><div><p class="text-xs text-emerald-600 font-black uppercase tracking-widest">Modo Contas</p><h1 class="text-2xl sm:text-3xl font-black text-slate-800">Minhas Contas</h1></div>${this.renderMonthFilter('Vencimentos')}</div><div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-5"><article class="card-surface p-5 hover:border-red-400 hover:shadow-md transition cursor-pointer flex flex-col" onclick="App.openAccountKind('payable')"><div class="mb-3"><p class="text-xs text-slate-400 font-bold uppercase">Conta</p><h2 class="text-xl font-black text-slate-800">Contas a Pagar</h2></div><p class="text-sm text-slate-500"><i class="fa-regular fa-calendar mr-1"></i> Vencimentos do mês selecionado</p><div class="mt-5 pt-4 border-t border-slate-100 flex items-end justify-between gap-3"><div><p class="text-[10px] text-slate-400 font-black uppercase">${this.formatMonthSmall(this.ui.selectedMonth)}</p><p class="text-xs text-slate-500">${payable.accounts.length} lançamento(s)</p></div><strong class="text-xl font-black ${payable.total > 0 ? 'text-red-600' : 'text-slate-700'}">${this.formatMoney(payable.total)}</strong></div></article><article class="card-surface p-5 hover:border-emerald-400 hover:shadow-md transition cursor-pointer flex flex-col" onclick="App.openAccountKind('receivable')"><div class="mb-3"><p class="text-xs text-slate-400 font-bold uppercase">Conta</p><h2 class="text-xl font-black text-slate-800">Contas a Receber</h2></div><p class="text-sm text-slate-500"><i class="fa-regular fa-calendar mr-1"></i> Vencimentos do mês selecionado</p><div class="mt-5 pt-4 border-t border-slate-100 flex items-end justify-between gap-3"><div><p class="text-[10px] text-slate-400 font-black uppercase">${this.formatMonthSmall(this.ui.selectedMonth)}</p><p class="text-xs text-slate-500">${receivable.accounts.length} lançamento(s)</p></div><strong class="text-xl font-black ${receivable.total > 0 ? 'text-emerald-600' : 'text-slate-700'}">${this.formatMoney(receivable.total)}</strong></div></article></div>`;
         }
 
         const kind = this.ui.accountKind;
