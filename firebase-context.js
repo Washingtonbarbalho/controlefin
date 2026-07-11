@@ -1,6 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
-import { getFirestore, collection, onSnapshot, doc, setDoc, getDoc, deleteDoc, updateDoc, writeBatch } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+import { getFirestore, collection, collectionGroup, onSnapshot, doc, setDoc, getDoc, deleteDoc, updateDoc, writeBatch } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
 
 // Mesma configuração Firebase utilizada pela versão original do aplicativo.
 // A chave de API identifica o projeto no cliente; não é uma senha de usuário.
@@ -41,6 +41,7 @@ const App = {
         transactions: [],
         accounts: [],
         userDirectory: [],
+        profileDirectory: [],
         accessList: []
     },
     ui: {
@@ -60,4 +61,4 @@ const getDeferredPrompt = () => deferredPrompt;
 const clearDeferredPrompt = () => { deferredPrompt = null; };
 
 window.App = App;
-export { App, db, auth, APP_ID, ADMIN_EMAIL, doc, setDoc, getDoc, deleteDoc, updateDoc, writeBatch, collection, onSnapshot, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, getDeferredPrompt, clearDeferredPrompt };
+export { App, db, auth, APP_ID, ADMIN_EMAIL, doc, setDoc, getDoc, deleteDoc, updateDoc, writeBatch, collection, collectionGroup, onSnapshot, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, getDeferredPrompt, clearDeferredPrompt };
