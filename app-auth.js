@@ -1,4 +1,4 @@
-import { App, db, auth, APP_ID, ADMIN_EMAIL, doc, setDoc, getDoc, collection, onSnapshot, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, getDeferredPrompt, clearDeferredPrompt } from './firebase-context.js';
+import { App, db, auth, APP_ID, ADMIN_EMAIL, doc, setDoc, getDoc, collection, collectionGroup, onSnapshot, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, getDeferredPrompt, clearDeferredPrompt } from './firebase-context.js';
 
 const isPermissionDenied = error => {
     const code = String(error?.code || '').toLowerCase();
@@ -11,7 +11,7 @@ Object.assign(App, {
             this.unsubscribeAll();
             this.user = user;
             this.userProfile = null;
-            this.data = { cards: [], categories: [], transactions: [], accounts: [], userDirectory: [], accessList: [] };
+            this.data = { cards: [], categories: [], transactions: [], accounts: [], userDirectory: [], profileDirectory: [], accessList: [] };
 
             if (!user) {
                 this.permissions = { cards: true, accounts: false };
@@ -139,6 +139,30 @@ Object.assign(App, {
                 this.data.userDirectory = snap.docs.map(item => ({ id: item.id, ...item.data() }));
                 rerender();
             }, optionalListenerError));
+
+            // Usuários cadastrados antes do painel de permissões já possuem
+            // profile/data. A consulta por grupo recupera esses perfis sem alterar UID,
+            // credenciais, cartões ou transações.
+            this.unsubscribes.push(onSnapshot(collectionGroup(db, 'profile'), snap => {
+                const usersByUid = new Map();
+                snap.docs.forEach(item => {
+                    const parts = item.ref.path.split('/');
+                    const belongsToThisApp = parts.length >= 6
+                        && parts[0] === 'artifacts'
+                        && parts[1] === APP_ID
+                        && parts[2] === 'users'
+                        && parts[4] === 'profile';
+                    if (!belongsToThisApp) return;
+                    const uid = parts[3];
+                    usersByUid.set(uid, { id: uid, uid, ...item.data() });
+                });
+                this.data.profileDirectory = [...usersByUid.values()];
+                rerender();
+            }, error => {
+                console.warn('Não foi possível listar perfis antigos. Publique as regras atualizadas do Firestore.', error);
+                optionalListenerError(error);
+            }));
+
             this.unsubscribes.push(onSnapshot(collection(db, `artifacts/${APP_ID}/access`), snap => {
                 this.data.accessList = snap.docs.map(item => ({ id: item.id, ...item.data() }));
                 rerender();
