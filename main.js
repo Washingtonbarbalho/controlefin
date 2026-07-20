@@ -13,5 +13,6 @@ import './app-ui-fixes.js';
 import './app-account-enhancements.js';
 import './app-centered-period-selector.js';
 import './app-desktop-period-filter.js';
+import './app-standardized-scope-options.js';
 
 App.init();
