@@ -14,5 +14,6 @@ import './app-account-enhancements.js';
 import './app-centered-period-selector.js';
 import './app-desktop-period-filter.js';
 import './app-standardized-scope-options.js';
+import './app-pdf-installments.js';
 
 App.init();
