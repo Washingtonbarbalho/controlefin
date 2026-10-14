@@ -37,22 +37,23 @@ Object.assign(App, {
             }
 
             const isAdmin = this.isAdmin();
-            if (isAdmin) {
-                this.permissions = { cards: true, accounts: true };
-            } else {
-                this.permissions = { cards: true, accounts: false };
-                try {
-                    const accessSnap = await getDoc(doc(db, `artifacts/${APP_ID}/access/${user.uid}`));
-                    if (accessSnap.exists()) {
-                        const access = accessSnap.data();
-                        this.permissions = {
-                            cards: access.cards !== false,
-                            accounts: access.accounts === true
-                        };
-                    }
-                } catch (error) {
-                    if (!isPermissionDenied(error)) console.warn('Não foi possível consultar permissões.', error);
+            // O administrador também escolhe quais módulos financeiros deseja usar.
+            // Para preservar o comportamento antigo, quando ainda não existe um documento
+            // de acesso para o admin, o padrão inicial continua sendo Cartões + Contas.
+            this.permissions = isAdmin
+                ? { cards: true, accounts: true }
+                : { cards: true, accounts: false };
+            try {
+                const accessSnap = await getDoc(doc(db, `artifacts/${APP_ID}/access/${user.uid}`));
+                if (accessSnap.exists()) {
+                    const access = accessSnap.data();
+                    this.permissions = {
+                        cards: access.cards !== false,
+                        accounts: access.accounts === true
+                    };
                 }
+            } catch (error) {
+                if (!isPermissionDenied(error)) console.warn('Não foi possível consultar permissões.', error);
             }
 
             // O diretório de usuários é complementar. Se as novas regras ainda não
@@ -165,6 +166,24 @@ Object.assign(App, {
 
             this.unsubscribes.push(onSnapshot(collection(db, `artifacts/${APP_ID}/access`), snap => {
                 this.data.accessList = snap.docs.map(item => ({ id: item.id, ...item.data() }));
+
+                const ownAccess = this.data.accessList.find(item => item.id === this.user.uid);
+                if (ownAccess) {
+                    this.permissions = {
+                        cards: ownAccess.cards !== false,
+                        accounts: ownAccess.accounts === true
+                    };
+
+                    if (!this.permissions.cards && !this.permissions.accounts) {
+                        if (this.ui.view !== 'admin') this.ui.view = 'no_access';
+                    } else if (this.ui.view.startsWith('card') && !this.permissions.cards) {
+                        this.goHome();
+                    } else if (this.ui.view === 'accounts' && !this.permissions.accounts) {
+                        this.goHome();
+                    }
+                    this.renderModuleNav();
+                }
+
                 rerender();
             }, optionalListenerError));
         }
